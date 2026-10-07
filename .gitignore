@@ -1,0 +1,12 @@
+# Local dependencies and interpreter caches
+/node_modules/
+__pycache__/
+*.py[cod]
+.DS_Store
+
+# Plugin runtime exchange and temporary scan archives; validation fixtures stay tracked
+/request.json
+/response.json
+/report.json
+/reports/
+/request-*.tmp

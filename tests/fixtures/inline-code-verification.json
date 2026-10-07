@@ -1,0 +1,90 @@
+{
+  "recordType": "actualBrowserFixtureMeasurement",
+  "pluginVersion": "0.2.1",
+  "fixture": "tests/fixtures/short-tail-layout.md",
+  "fixtureSha256": "c189c35807ba62e321d78b34dba7173b3909731bdbdf88cd6b81e81619cbe32e",
+  "environment": {
+    "browser": "154.0.8037.98",
+    "style": "p: 16px sans-serif / 24px; code: 16px monospace",
+    "widths": [
+      668,
+      120
+    ]
+  },
+  "measurements": [
+    {
+      "text": "合成样本用于测试 item-a01 作布局对照，将样本数设为 0，检查 AB 行内代码：",
+      "lineCount": 1,
+      "availableWidthPx": 668,
+      "lastLine": "合成样本用于测试 item-a01 作布局对照，将样本数设为 0，检查 AB 行内代码：",
+      "lastLineWidthPx": 582.4,
+      "lastLineRatio": 87.2,
+      "manualBreakCount": 0,
+      "lastSegmentLineCount": 1,
+      "suspected": false,
+      "tails": [],
+      "lines": [
+        {
+          "text": "合成样本用于测试 item-a01 作布局对照，将样本数设为 0，检查 AB 行内代码：",
+          "widthPx": 582.4,
+          "segment": 0,
+          "logicalLine": 1
+        }
+      ]
+    },
+    {
+      "text": "合成样本用于测试 item-a01 作布局对照，将样本数设为 0，检查 AB 行内代码：",
+      "lineCount": 6,
+      "availableWidthPx": 120,
+      "lastLine": "码：",
+      "lastLineWidthPx": 32,
+      "lastLineRatio": 26.7,
+      "manualBreakCount": 0,
+      "lastSegmentLineCount": 6,
+      "suspected": false,
+      "tails": [],
+      "lines": [
+        {
+          "text": "合成样本用于测",
+          "widthPx": 112,
+          "segment": 0,
+          "logicalLine": 1
+        },
+        {
+          "text": "试 item-a01 作",
+          "widthPx": 119.5,
+          "segment": 0,
+          "logicalLine": 1
+        },
+        {
+          "text": "布局对照，将样",
+          "widthPx": 112,
+          "segment": 0,
+          "logicalLine": 1
+        },
+        {
+          "text": "本数设为 0，检",
+          "widthPx": 110.9,
+          "segment": 0,
+          "logicalLine": 1
+        },
+        {
+          "text": "查 AB 行内代",
+          "widthPx": 96,
+          "segment": 0,
+          "logicalLine": 1
+        },
+        {
+          "text": "码：",
+          "widthPx": 32,
+          "segment": 0,
+          "logicalLine": 1
+        }
+      ]
+    }
+  ],
+  "limitations": [
+    "真实浏览器测量，不是真实 Obsidian 验证",
+    "不与已删减的旧样本测量直接比较"
+  ]
+}

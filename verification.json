@@ -1,0 +1,26 @@
+{
+  "recordType": "sanitizedHistoricalVerificationSummary",
+  "purpose": "同一文本随实际可用宽度变化产生不同换行和短尾结果",
+  "provenance": "历史真实 Obsidian 验证；不是新运行或合成样本测量",
+  "measurements": {
+    "wide": {
+      "lineCount": 1,
+      "availableWidthPx": 668,
+      "lastLineWidthPx": 572.7,
+      "lastLineRatio": 85.7,
+      "suspected": false
+    },
+    "narrow": {
+      "lineCount": 2,
+      "availableWidthPx": 505,
+      "lastLineWidthPx": 80,
+      "lastLineRatio": 15.8,
+      "suspected": true
+    }
+  },
+  "visualComparisonVerified": true,
+  "limitations": [
+    "只验证一个文本块",
+    "已移除笔记内容、路径和私人验证标识，不能独立复现历史测量"
+  ]
+}

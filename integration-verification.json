@@ -1,0 +1,1108 @@
+{
+  "actualReport": {
+    "schemaVersion": 2,
+    "pluginVersion": "0.2.0",
+    "capturedAt": "2026-10-06T17:36:49.189Z",
+    "file": "测试/短尾行检测测试.md",
+    "mode": "reading",
+    "scope": "全文逐屏扫描；折叠、嵌入、表格等未覆盖内容须另查",
+    "scan": {
+      "full": true,
+      "reachedEnd": true,
+      "steps": 7,
+      "complete": true,
+      "missingSourceLocations": false,
+      "expectedSectionCount": 50,
+      "uncoveredSections": []
+    },
+    "thresholdPercent": 25,
+    "viewportWidthPx": 901,
+    "blocks": [
+      {
+        "key": "9:9:0",
+        "heading": "短尾行检测测试",
+        "kind": "正文或引用",
+        "sourceStartLine": 10,
+        "sourceEndLine": 10,
+        "domPath": "0",
+        "protectedContent": false,
+        "characterDiagram": false,
+        "text": "本文件是独立测试样本，不是学习笔记；请在关闭侧栏的阅读视图中检测",
+        "lineCount": 1,
+        "availableWidthPx": 668,
+        "lastLine": "本文件是独立测试样本，不是学习笔记；请在关闭侧栏的阅读视图中检测",
+        "lastLineWidthPx": 512,
+        "lastLineRatio": 76.6,
+        "manualBreakCount": 0,
+        "lastSegmentLineCount": 1,
+        "suspected": false,
+        "tails": [],
+        "lines": [
+          {
+            "text": "本文件是独立测试样本，不是学习笔记；请在关闭侧栏的阅读视图中检测",
+            "widthPx": 512,
+            "segment": 0,
+            "logicalLine": 1
+          }
+        ]
+      },
+      {
+        "key": "11:11:0",
+        "heading": "短尾行检测测试",
+        "kind": "正文或引用",
+        "sourceStartLine": 12,
+        "sourceEndLine": 12,
+        "domPath": "0",
+        "protectedContent": false,
+        "characterDiagram": false,
+        "text": "短尾行不能仅凭字数预先保证。以下梯度样本用来产生不同的实际换行，报告须与显示一致",
+        "lineCount": 1,
+        "availableWidthPx": 668,
+        "lastLine": "短尾行不能仅凭字数预先保证。以下梯度样本用来产生不同的实际换行，报告须与显示一致",
+        "lastLineWidthPx": 640,
+        "lastLineRatio": 95.8,
+        "manualBreakCount": 0,
+        "lastSegmentLineCount": 1,
+        "suspected": false,
+        "tails": [],
+        "lines": [
+          {
+            "text": "短尾行不能仅凭字数预先保证。以下梯度样本用来产生不同的实际换行，报告须与显示一致",
+            "widthPx": 640,
+            "segment": 0,
+            "logicalLine": 1
+          }
+        ]
+      },
+      {
+        "key": "17:17:0",
+        "heading": "1.1 正文样本 A01（40 个字符）",
+        "kind": "正文或引用",
+        "sourceStartLine": 18,
+        "sourceEndLine": 18,
+        "domPath": "0",
+        "protectedContent": false,
+        "characterDiagram": false,
+        "text": "本段用于验证阅读视图中的自动换行和末行宽度检测结果，文字仅为测试样本，不代表需要",
+        "lineCount": 1,
+        "availableWidthPx": 668,
+        "lastLine": "本段用于验证阅读视图中的自动换行和末行宽度检测结果，文字仅为测试样本，不代表需要",
+        "lastLineWidthPx": 640,
+        "lastLineRatio": 95.8,
+        "manualBreakCount": 0,
+        "lastSegmentLineCount": 1,
+        "suspected": false,
+        "tails": [],
+        "lines": [
+          {
+            "text": "本段用于验证阅读视图中的自动换行和末行宽度检测结果，文字仅为测试样本，不代表需要",
+            "widthPx": 640,
+            "segment": 0,
+            "logicalLine": 1
+          }
+        ]
+      },
+      {
+        "key": "23:23:0",
+        "heading": "1.2 正文样本 A02（43 个字符）",
+        "kind": "正文或引用",
+        "sourceStartLine": 24,
+        "sourceEndLine": 24,
+        "domPath": "0",
+        "protectedContent": false,
+        "characterDiagram": false,
+        "text": "本段用于验证阅读视图中的自动换行和末行宽度检测结果，文字仅为测试样本，不代表需要记忆的",
+        "lineCount": 2,
+        "availableWidthPx": 668,
+        "lastLine": "忆的",
+        "lastLineWidthPx": 32,
+        "lastLineRatio": 4.8,
+        "manualBreakCount": 0,
+        "lastSegmentLineCount": 2,
+        "suspected": true,
+        "tails": [
+          {
+            "logicalLine": 1,
+            "visualLineCount": 2,
+            "text": "忆的",
+            "widthPx": 32,
+            "ratioPercent": 4.8
+          }
+        ],
+        "lines": [
+          {
+            "text": "本段用于验证阅读视图中的自动换行和末行宽度检测结果，文字仅为测试样本，不代表需要记",
+            "widthPx": 656,
+            "segment": 0,
+            "logicalLine": 1
+          },
+          {
+            "text": "忆的",
+            "widthPx": 32,
+            "segment": 0,
+            "logicalLine": 1
+          }
+        ]
+      },
+      {
+        "key": "29:29:0",
+        "heading": "1.3 正文样本 A03（46 个字符）",
+        "kind": "正文或引用",
+        "sourceStartLine": 30,
+        "sourceEndLine": 30,
+        "domPath": "0",
+        "protectedContent": false,
+        "characterDiagram": false,
+        "text": "本段用于验证阅读视图中的自动换行和末行宽度检测结果，文字仅为测试样本，不代表需要记忆的技术知",
+        "lineCount": 2,
+        "availableWidthPx": 668,
+        "lastLine": "忆的技术知",
+        "lastLineWidthPx": 80,
+        "lastLineRatio": 12,
+        "manualBreakCount": 0,
+        "lastSegmentLineCount": 2,
+        "suspected": true,
+        "tails": [
+          {
+            "logicalLine": 1,
+            "visualLineCount": 2,
+            "text": "忆的技术知",
+            "widthPx": 80,
+            "ratioPercent": 12
+          }
+        ],
+        "lines": [
+          {
+            "text": "本段用于验证阅读视图中的自动换行和末行宽度检测结果，文字仅为测试样本，不代表需要记",
+            "widthPx": 656,
+            "segment": 0,
+            "logicalLine": 1
+          },
+          {
+            "text": "忆的技术知",
+            "widthPx": 80,
+            "segment": 0,
+            "logicalLine": 1
+          }
+        ]
+      },
+      {
+        "key": "35:35:0",
+        "heading": "1.4 正文样本 A04（65 个字符）",
+        "kind": "正文或引用",
+        "sourceStartLine": 36,
+        "sourceEndLine": 36,
+        "domPath": "0",
+        "protectedContent": false,
+        "characterDiagram": false,
+        "text": "本段用于验证阅读视图中的自动换行和末行宽度检测结果，文字仅为测试样本，不代表需要记忆的技术知识，请对照当前窗口中的实际显示逐行核对",
+        "lineCount": 2,
+        "availableWidthPx": 668,
+        "lastLine": "忆的技术知识，请对照当前窗口中的实际显示逐行核对",
+        "lastLineWidthPx": 384,
+        "lastLineRatio": 57.5,
+        "manualBreakCount": 0,
+        "lastSegmentLineCount": 2,
+        "suspected": false,
+        "tails": [],
+        "lines": [
+          {
+            "text": "本段用于验证阅读视图中的自动换行和末行宽度检测结果，文字仅为测试样本，不代表需要记",
+            "widthPx": 656,
+            "segment": 0,
+            "logicalLine": 1
+          },
+          {
+            "text": "忆的技术知识，请对照当前窗口中的实际显示逐行核对",
+            "widthPx": 384,
+            "segment": 0,
+            "logicalLine": 1
+          }
+        ]
+      },
+      {
+        "key": "43:43:0",
+        "heading": "2.1 单行对照",
+        "kind": "正文或引用",
+        "sourceStartLine": 44,
+        "sourceEndLine": 44,
+        "domPath": "0",
+        "protectedContent": false,
+        "characterDiagram": false,
+        "text": "检查设备状态",
+        "lineCount": 1,
+        "availableWidthPx": 668,
+        "lastLine": "检查设备状态",
+        "lastLineWidthPx": 96,
+        "lastLineRatio": 14.4,
+        "manualBreakCount": 0,
+        "lastSegmentLineCount": 1,
+        "suspected": false,
+        "tails": [],
+        "lines": [
+          {
+            "text": "检查设备状态",
+            "widthPx": 96,
+            "segment": 0,
+            "logicalLine": 1
+          }
+        ]
+      },
+      {
+        "key": "49:49:0",
+        "heading": "2.2 多行对照",
+        "kind": "正文或引用",
+        "sourceStartLine": 50,
+        "sourceEndLine": 50,
+        "domPath": "0",
+        "protectedContent": false,
+        "characterDiagram": false,
+        "text": "本段用于验证普通长段落的检测结果，包含中文说明、英文术语和必要标点。检测工具应报告实际行数和末行文字，不能因为段落超过一行就自动判定存在问题。末行是否需要优化，应结合占用宽度和内容含义判断",
+        "lineCount": 3,
+        "availableWidthPx": 668,
+        "lastLine": "合占用宽度和内容含义判断",
+        "lastLineWidthPx": 192,
+        "lastLineRatio": 28.7,
+        "manualBreakCount": 0,
+        "lastSegmentLineCount": 3,
+        "suspected": false,
+        "tails": [],
+        "lines": [
+          {
+            "text": "本段用于验证普通长段落的检测结果，包含中文说明、英文术语和必要标点。检测工具应报告",
+            "widthPx": 656,
+            "segment": 0,
+            "logicalLine": 1
+          },
+          {
+            "text": "实际行数和末行文字，不能因为段落超过一行就自动判定存在问题。末行是否需要优化，应结",
+            "widthPx": 656,
+            "segment": 0,
+            "logicalLine": 1
+          },
+          {
+            "text": "合占用宽度和内容含义判断",
+            "widthPx": 192,
+            "segment": 0,
+            "logicalLine": 1
+          }
+        ]
+      },
+      {
+        "key": "61:62:0.1.0",
+        "heading": "4. K 知识块",
+        "kind": "K知识块",
+        "sourceStartLine": 62,
+        "sourceEndLine": 63,
+        "domPath": "0.1.0",
+        "protectedContent": false,
+        "characterDiagram": false,
+        "text": "检查设备状态",
+        "lineCount": 1,
+        "availableWidthPx": 608,
+        "lastLine": "检查设备状态",
+        "lastLineWidthPx": 84,
+        "lastLineRatio": 13.8,
+        "manualBreakCount": 0,
+        "lastSegmentLineCount": 1,
+        "suspected": false,
+        "tails": [],
+        "lines": [
+          {
+            "text": "检查设备状态",
+            "widthPx": 84,
+            "segment": 0,
+            "logicalLine": 1
+          }
+        ]
+      },
+      {
+        "key": "64:65:0.1.0",
+        "heading": "4. K 知识块",
+        "kind": "K知识块",
+        "sourceStartLine": 65,
+        "sourceEndLine": 66,
+        "domPath": "0.1.0",
+        "protectedContent": false,
+        "characterDiagram": false,
+        "text": "本段用于验证阅读视图中的自动换行和末行宽度检测结果，文字仅为测试样本，不代表需要记忆的技",
+        "lineCount": 2,
+        "availableWidthPx": 608,
+        "lastLine": "技",
+        "lastLineWidthPx": 14,
+        "lastLineRatio": 2.3,
+        "manualBreakCount": 0,
+        "lastSegmentLineCount": 2,
+        "suspected": true,
+        "tails": [
+          {
+            "logicalLine": 1,
+            "visualLineCount": 2,
+            "text": "技",
+            "widthPx": 14,
+            "ratioPercent": 2.3
+          }
+        ],
+        "lines": [
+          {
+            "text": "本段用于验证阅读视图中的自动换行和末行宽度检测结果，文字仅为测试样本，不代表需要记忆的",
+            "widthPx": 602,
+            "segment": 0,
+            "logicalLine": 1
+          },
+          {
+            "text": "技",
+            "widthPx": 14,
+            "segment": 0,
+            "logicalLine": 1
+          }
+        ]
+      },
+      {
+        "key": "67:68:0.1.0",
+        "heading": "4. K 知识块",
+        "kind": "K知识块",
+        "sourceStartLine": 68,
+        "sourceEndLine": 69,
+        "domPath": "0.1.0",
+        "protectedContent": false,
+        "characterDiagram": false,
+        "text": "本段用于验证阅读视图中的自动换行和末行宽度检测结果，文字仅为测试样本，不代表需要记忆的技术知识",
+        "lineCount": 2,
+        "availableWidthPx": 608,
+        "lastLine": "技术知识",
+        "lastLineWidthPx": 56,
+        "lastLineRatio": 9.2,
+        "manualBreakCount": 0,
+        "lastSegmentLineCount": 2,
+        "suspected": true,
+        "tails": [
+          {
+            "logicalLine": 1,
+            "visualLineCount": 2,
+            "text": "技术知识",
+            "widthPx": 56,
+            "ratioPercent": 9.2
+          }
+        ],
+        "lines": [
+          {
+            "text": "本段用于验证阅读视图中的自动换行和末行宽度检测结果，文字仅为测试样本，不代表需要记忆的",
+            "widthPx": 602,
+            "segment": 0,
+            "logicalLine": 1
+          },
+          {
+            "text": "技术知识",
+            "widthPx": 56,
+            "segment": 0,
+            "logicalLine": 1
+          }
+        ]
+      },
+      {
+        "key": "70:71:0.1.0",
+        "heading": "4. K 知识块",
+        "kind": "K知识块",
+        "sourceStartLine": 71,
+        "sourceEndLine": 72,
+        "domPath": "0.1.0",
+        "protectedContent": false,
+        "characterDiagram": false,
+        "text": "本段用于验证阅读视图中的自动换行和末行宽度检测结果，文字仅为测试样本，不代表需要记忆的技术知识，请对",
+        "lineCount": 2,
+        "availableWidthPx": 608,
+        "lastLine": "技术知识，请对",
+        "lastLineWidthPx": 98,
+        "lastLineRatio": 16.1,
+        "manualBreakCount": 0,
+        "lastSegmentLineCount": 2,
+        "suspected": true,
+        "tails": [
+          {
+            "logicalLine": 1,
+            "visualLineCount": 2,
+            "text": "技术知识，请对",
+            "widthPx": 98,
+            "ratioPercent": 16.1
+          }
+        ],
+        "lines": [
+          {
+            "text": "本段用于验证阅读视图中的自动换行和末行宽度检测结果，文字仅为测试样本，不代表需要记忆的",
+            "widthPx": 602,
+            "segment": 0,
+            "logicalLine": 1
+          },
+          {
+            "text": "技术知识，请对",
+            "widthPx": 98,
+            "segment": 0,
+            "logicalLine": 1
+          }
+        ]
+      },
+      {
+        "key": "77:77:0.0",
+        "heading": "5. 引用与嵌套",
+        "kind": "正文或引用",
+        "sourceStartLine": 78,
+        "sourceEndLine": 78,
+        "domPath": "0.0",
+        "protectedContent": false,
+        "characterDiagram": false,
+        "text": "检查设备状态",
+        "lineCount": 1,
+        "availableWidthPx": 636,
+        "lastLine": "检查设备状态",
+        "lastLineWidthPx": 96,
+        "lastLineRatio": 15.1,
+        "manualBreakCount": 0,
+        "lastSegmentLineCount": 1,
+        "suspected": false,
+        "tails": [],
+        "lines": [
+          {
+            "text": "检查设备状态",
+            "widthPx": 96,
+            "segment": 0,
+            "logicalLine": 1
+          }
+        ]
+      },
+      {
+        "key": "79:79:0.0",
+        "heading": "5. 引用与嵌套",
+        "kind": "正文或引用",
+        "sourceStartLine": 80,
+        "sourceEndLine": 80,
+        "domPath": "0.0",
+        "protectedContent": false,
+        "characterDiagram": false,
+        "text": "本段用于验证一级引用缩进后，正文实际可用宽度是否被正确测量，检测结果应与阅读视图一致",
+        "lineCount": 2,
+        "availableWidthPx": 636,
+        "lastLine": "图一致",
+        "lastLineWidthPx": 48,
+        "lastLineRatio": 7.5,
+        "manualBreakCount": 0,
+        "lastSegmentLineCount": 2,
+        "suspected": true,
+        "tails": [
+          {
+            "logicalLine": 1,
+            "visualLineCount": 2,
+            "text": "图一致",
+            "widthPx": 48,
+            "ratioPercent": 7.5
+          }
+        ],
+        "lines": [
+          {
+            "text": "本段用于验证一级引用缩进后，正文实际可用宽度是否被正确测量，检测结果应与阅读视",
+            "widthPx": 624,
+            "segment": 0,
+            "logicalLine": 1
+          },
+          {
+            "text": "图一致",
+            "widthPx": 48,
+            "segment": 0,
+            "logicalLine": 1
+          }
+        ]
+      },
+      {
+        "key": "81:81:0.0.0",
+        "heading": "5. 引用与嵌套",
+        "kind": "正文或引用",
+        "sourceStartLine": 82,
+        "sourceEndLine": 82,
+        "domPath": "0.0.0",
+        "protectedContent": false,
+        "characterDiagram": false,
+        "text": "本段用于验证二级引用缩进后，正文实际可用宽度是否被正确测量，检测结果应与阅读视图一致",
+        "lineCount": 2,
+        "availableWidthPx": 604,
+        "lastLine": "读视图一致",
+        "lastLineWidthPx": 80,
+        "lastLineRatio": 13.2,
+        "manualBreakCount": 0,
+        "lastSegmentLineCount": 2,
+        "suspected": true,
+        "tails": [
+          {
+            "logicalLine": 1,
+            "visualLineCount": 2,
+            "text": "读视图一致",
+            "widthPx": 80,
+            "ratioPercent": 13.2
+          }
+        ],
+        "lines": [
+          {
+            "text": "本段用于验证二级引用缩进后，正文实际可用宽度是否被正确测量，检测结果应与阅",
+            "widthPx": 592,
+            "segment": 0,
+            "logicalLine": 1
+          },
+          {
+            "text": "读视图一致",
+            "widthPx": 80,
+            "segment": 0,
+            "logicalLine": 1
+          }
+        ]
+      },
+      {
+        "key": "83:90:0.0.1",
+        "heading": "5. 引用与嵌套",
+        "kind": "正文或引用",
+        "sourceStartLine": 84,
+        "sourceEndLine": 91,
+        "domPath": "0.0.1",
+        "protectedContent": false,
+        "characterDiagram": false,
+        "text": "列表中的独立段落：",
+        "lineCount": 1,
+        "availableWidthPx": 605.8,
+        "lastLine": "列表中的独立段落：",
+        "lastLineWidthPx": 144,
+        "lastLineRatio": 23.8,
+        "manualBreakCount": 0,
+        "lastSegmentLineCount": 1,
+        "suspected": false,
+        "tails": [],
+        "lines": [
+          {
+            "text": "列表中的独立段落：",
+            "widthPx": 144,
+            "segment": 0,
+            "logicalLine": 1
+          }
+        ]
+      },
+      {
+        "key": "83:90:0.0.2",
+        "heading": "5. 引用与嵌套",
+        "kind": "正文或引用",
+        "sourceStartLine": 84,
+        "sourceEndLine": 91,
+        "domPath": "0.0.2",
+        "protectedContent": false,
+        "characterDiagram": false,
+        "text": "本段用于验证列表中正文的可用宽度，外层列表缩进应反映在测量结果中，不能继续套用普通正文的宽度",
+        "lineCount": 2,
+        "availableWidthPx": 605.8,
+        "lastLine": "套用普通正文的宽度",
+        "lastLineWidthPx": 144,
+        "lastLineRatio": 23.8,
+        "manualBreakCount": 0,
+        "lastSegmentLineCount": 2,
+        "suspected": true,
+        "tails": [
+          {
+            "logicalLine": 1,
+            "visualLineCount": 2,
+            "text": "套用普通正文的宽度",
+            "widthPx": 144,
+            "ratioPercent": 23.8
+          }
+        ],
+        "lines": [
+          {
+            "text": "本段用于验证列表中正文的可用宽度，外层列表缩进应反映在测量结果中，不能继续",
+            "widthPx": 592,
+            "segment": 0,
+            "logicalLine": 1
+          },
+          {
+            "text": "套用普通正文的宽度",
+            "widthPx": 144,
+            "segment": 0,
+            "logicalLine": 1
+          }
+        ]
+      },
+      {
+        "key": "83:90:0.1.1",
+        "heading": "5. 引用与嵌套",
+        "kind": "正文或引用",
+        "sourceStartLine": 84,
+        "sourceEndLine": 91,
+        "domPath": "0.1.1",
+        "protectedContent": false,
+        "characterDiagram": false,
+        "text": "列表中的知识块：",
+        "lineCount": 1,
+        "availableWidthPx": 605.8,
+        "lastLine": "列表中的知识块：",
+        "lastLineWidthPx": 128,
+        "lastLineRatio": 21.1,
+        "manualBreakCount": 0,
+        "lastSegmentLineCount": 1,
+        "suspected": false,
+        "tails": [],
+        "lines": [
+          {
+            "text": "列表中的知识块：",
+            "widthPx": 128,
+            "segment": 0,
+            "logicalLine": 1
+          }
+        ]
+      },
+      {
+        "key": "83:90:0.1.2.1.0",
+        "heading": "5. 引用与嵌套",
+        "kind": "K知识块",
+        "sourceStartLine": 84,
+        "sourceEndLine": 91,
+        "domPath": "0.1.2.1.0",
+        "protectedContent": false,
+        "characterDiagram": false,
+        "text": "本段用于验证列表嵌套知识块后的实际换行，外层缩进和块内留白均应反映在测量结果中",
+        "lineCount": 2,
+        "availableWidthPx": 545.8,
+        "lastLine": "中",
+        "lastLineWidthPx": 14,
+        "lastLineRatio": 2.6,
+        "manualBreakCount": 0,
+        "lastSegmentLineCount": 2,
+        "suspected": true,
+        "tails": [
+          {
+            "logicalLine": 1,
+            "visualLineCount": 2,
+            "text": "中",
+            "widthPx": 14,
+            "ratioPercent": 2.6
+          }
+        ],
+        "lines": [
+          {
+            "text": "本段用于验证列表嵌套知识块后的实际换行，外层缩进和块内留白均应反映在测量结果",
+            "widthPx": 532,
+            "segment": 0,
+            "logicalLine": 1
+          },
+          {
+            "text": "中",
+            "widthPx": 14,
+            "segment": 0,
+            "logicalLine": 1
+          }
+        ]
+      },
+      {
+        "key": "96:96:0",
+        "heading": "6. 代码块对照（当前原型应明确跳过）",
+        "kind": "正文或引用",
+        "sourceStartLine": 97,
+        "sourceEndLine": 97,
+        "domPath": "0",
+        "protectedContent": false,
+        "characterDiagram": false,
+        "text": "以下是排版样本，不用于执行。短命令的主动换行不能当作短尾行",
+        "lineCount": 1,
+        "availableWidthPx": 668,
+        "lastLine": "以下是排版样本，不用于执行。短命令的主动换行不能当作短尾行",
+        "lastLineWidthPx": 464,
+        "lastLineRatio": 69.5,
+        "manualBreakCount": 0,
+        "lastSegmentLineCount": 1,
+        "suspected": false,
+        "tails": [],
+        "lines": [
+          {
+            "text": "以下是排版样本，不用于执行。短命令的主动换行不能当作短尾行",
+            "widthPx": 464,
+            "segment": 0,
+            "logicalLine": 1
+          }
+        ]
+      },
+      {
+        "key": "98:102:0",
+        "heading": "6. 代码块对照（当前原型应明确跳过）",
+        "kind": "代码块",
+        "sourceStartLine": 99,
+        "sourceEndLine": 103,
+        "domPath": "0",
+        "protectedContent": true,
+        "characterDiagram": false,
+        "text": "ls\npwd\n# 本行用于验证代码注释因显示宽度而自动换行时，检测工具能否区分视觉换行与源码中的主动换行",
+        "lineCount": 4,
+        "availableWidthPx": 604,
+        "lastLine": "换行",
+        "lastLineWidthPx": 28,
+        "lastLineRatio": 4.6,
+        "manualBreakCount": 3,
+        "lastSegmentLineCount": 2,
+        "suspected": true,
+        "tails": [
+          {
+            "logicalLine": 3,
+            "visualLineCount": 2,
+            "text": "换行",
+            "widthPx": 28,
+            "ratioPercent": 4.6
+          }
+        ],
+        "lines": [
+          {
+            "text": "ls",
+            "widthPx": 16.9,
+            "segment": 0,
+            "logicalLine": 1
+          },
+          {
+            "text": "pwd",
+            "widthPx": 25.3,
+            "segment": 1,
+            "logicalLine": 2
+          },
+          {
+            "text": "# 本行用于验证代码注释因显示宽度而自动换行时，检测工具能否区分视觉换行与源码中的主动",
+            "widthPx": 590.9,
+            "segment": 2,
+            "logicalLine": 3
+          },
+          {
+            "text": "换行",
+            "widthPx": 28,
+            "segment": 2,
+            "logicalLine": 3
+          }
+        ]
+      },
+      {
+        "key": "104:104:0",
+        "heading": "6. 代码块对照（当前原型应明确跳过）",
+        "kind": "正文或引用",
+        "sourceStartLine": 105,
+        "sourceEndLine": 105,
+        "domPath": "0",
+        "protectedContent": false,
+        "characterDiagram": false,
+        "text": "以下为每行独立的文本记录，最后一行很短是正常情况",
+        "lineCount": 1,
+        "availableWidthPx": 668,
+        "lastLine": "以下为每行独立的文本记录，最后一行很短是正常情况",
+        "lastLineWidthPx": 384,
+        "lastLineRatio": 57.5,
+        "manualBreakCount": 0,
+        "lastSegmentLineCount": 1,
+        "suspected": false,
+        "tails": [],
+        "lines": [
+          {
+            "text": "以下为每行独立的文本记录，最后一行很短是正常情况",
+            "widthPx": 384,
+            "segment": 0,
+            "logicalLine": 1
+          }
+        ]
+      },
+      {
+        "key": "106:110:0",
+        "heading": "6. 代码块对照（当前原型应明确跳过）",
+        "kind": "代码块",
+        "sourceStartLine": 107,
+        "sourceEndLine": 111,
+        "domPath": "0",
+        "protectedContent": true,
+        "characterDiagram": false,
+        "text": "第一条独立记录\n第二条独立记录\n结束",
+        "lineCount": 3,
+        "availableWidthPx": 604,
+        "lastLine": "结束",
+        "lastLineWidthPx": 28,
+        "lastLineRatio": 4.6,
+        "manualBreakCount": 3,
+        "lastSegmentLineCount": 1,
+        "suspected": false,
+        "tails": [],
+        "lines": [
+          {
+            "text": "第一条独立记录",
+            "widthPx": 98,
+            "segment": 0,
+            "logicalLine": 1
+          },
+          {
+            "text": "第二条独立记录",
+            "widthPx": 98,
+            "segment": 1,
+            "logicalLine": 2
+          },
+          {
+            "text": "结束",
+            "widthPx": 28,
+            "segment": 2,
+            "logicalLine": 3
+          }
+        ]
+      },
+      {
+        "key": "116:116:0",
+        "heading": "7. 手动断行对照",
+        "kind": "正文或引用",
+        "sourceStartLine": 117,
+        "sourceEndLine": 117,
+        "domPath": "0",
+        "protectedContent": false,
+        "characterDiagram": false,
+        "text": "以下两行由 Markdown 主动断行，用于检验误报，不要求把末行扩写",
+        "lineCount": 1,
+        "availableWidthPx": 668,
+        "lastLine": "以下两行由 Markdown 主动断行，用于检验误报，不要求把末行扩写",
+        "lastLineWidthPx": 483.8,
+        "lastLineRatio": 72.4,
+        "manualBreakCount": 0,
+        "lastSegmentLineCount": 1,
+        "suspected": false,
+        "tails": [],
+        "lines": [
+          {
+            "text": "以下两行由 Markdown 主动断行，用于检验误报，不要求把末行扩写",
+            "widthPx": 483.8,
+            "segment": 0,
+            "logicalLine": 1
+          }
+        ]
+      },
+      {
+        "key": "118:119:0",
+        "heading": "7. 手动断行对照",
+        "kind": "正文或引用",
+        "sourceStartLine": 119,
+        "sourceEndLine": 120,
+        "domPath": "0",
+        "protectedContent": false,
+        "characterDiagram": false,
+        "text": "这是刻意保留的第一行文本\n结束",
+        "lineCount": 2,
+        "availableWidthPx": 668,
+        "lastLine": "结束",
+        "lastLineWidthPx": 32,
+        "lastLineRatio": 4.8,
+        "manualBreakCount": 1,
+        "lastSegmentLineCount": 1,
+        "suspected": false,
+        "tails": [],
+        "lines": [
+          {
+            "text": "这是刻意保留的第一行文本",
+            "widthPx": 192,
+            "segment": 0,
+            "logicalLine": 1
+          },
+          {
+            "text": "结束",
+            "widthPx": 32,
+            "segment": 1,
+            "logicalLine": 2
+          }
+        ]
+      },
+      {
+        "key": "125:130:0.0",
+        "heading": "8. 测试检查清单",
+        "kind": "列表文本",
+        "sourceStartLine": 126,
+        "sourceEndLine": 131,
+        "domPath": "0.0",
+        "protectedContent": false,
+        "characterDiagram": false,
+        "text": "先记录实际行数和末行文字，再对照工具结果",
+        "lineCount": 1,
+        "availableWidthPx": 637.8,
+        "lastLine": "先记录实际行数和末行文字，再对照工具结果",
+        "lastLineWidthPx": 320,
+        "lastLineRatio": 50.2,
+        "manualBreakCount": 0,
+        "lastSegmentLineCount": 1,
+        "suspected": false,
+        "tails": [],
+        "lines": [
+          {
+            "text": "先记录实际行数和末行文字，再对照工具结果",
+            "widthPx": 320,
+            "segment": 0,
+            "logicalLine": 1
+          }
+        ]
+      },
+      {
+        "key": "125:130:0.1",
+        "heading": "8. 测试检查清单",
+        "kind": "列表文本",
+        "sourceStartLine": 126,
+        "sourceEndLine": 131,
+        "domPath": "0.1",
+        "protectedContent": false,
+        "characterDiagram": false,
+        "text": "单行短句不能因为宽度占比小而被标为短尾行",
+        "lineCount": 1,
+        "availableWidthPx": 637.8,
+        "lastLine": "单行短句不能因为宽度占比小而被标为短尾行",
+        "lastLineWidthPx": 320,
+        "lastLineRatio": 50.2,
+        "manualBreakCount": 0,
+        "lastSegmentLineCount": 1,
+        "suspected": false,
+        "tails": [],
+        "lines": [
+          {
+            "text": "单行短句不能因为宽度占比小而被标为短尾行",
+            "widthPx": 320,
+            "segment": 0,
+            "logicalLine": 1
+          }
+        ]
+      },
+      {
+        "key": "125:130:0.2",
+        "heading": "8. 测试检查清单",
+        "kind": "列表文本",
+        "sourceStartLine": 126,
+        "sourceEndLine": 131,
+        "domPath": "0.2",
+        "protectedContent": false,
+        "characterDiagram": false,
+        "text": "K 与嵌套的实际宽度应不同于普通正文",
+        "lineCount": 1,
+        "availableWidthPx": 637.8,
+        "lastLine": "K 与嵌套的实际宽度应不同于普通正文",
+        "lastLineWidthPx": 270.4,
+        "lastLineRatio": 42.4,
+        "manualBreakCount": 0,
+        "lastSegmentLineCount": 1,
+        "suspected": false,
+        "tails": [],
+        "lines": [
+          {
+            "text": "K 与嵌套的实际宽度应不同于普通正文",
+            "widthPx": 270.4,
+            "segment": 0,
+            "logicalLine": 1
+          }
+        ]
+      },
+      {
+        "key": "125:130:0.3",
+        "heading": "8. 测试检查清单",
+        "kind": "列表文本",
+        "sourceStartLine": 126,
+        "sourceEndLine": 131,
+        "domPath": "0.3",
+        "protectedContent": false,
+        "characterDiagram": false,
+        "text": "未覆盖的代码块须显示跳过，不能算作通过",
+        "lineCount": 1,
+        "availableWidthPx": 637.8,
+        "lastLine": "未覆盖的代码块须显示跳过，不能算作通过",
+        "lastLineWidthPx": 304,
+        "lastLineRatio": 47.7,
+        "manualBreakCount": 0,
+        "lastSegmentLineCount": 1,
+        "suspected": false,
+        "tails": [],
+        "lines": [
+          {
+            "text": "未覆盖的代码块须显示跳过，不能算作通过",
+            "widthPx": 304,
+            "segment": 0,
+            "logicalLine": 1
+          }
+        ]
+      },
+      {
+        "key": "125:130:0.4",
+        "heading": "8. 测试检查清单",
+        "kind": "列表文本",
+        "sourceStartLine": 126,
+        "sourceEndLine": 131,
+        "domPath": "0.4",
+        "protectedContent": false,
+        "characterDiagram": false,
+        "text": "手动断行样本用于暴露当前原型是否误报",
+        "lineCount": 1,
+        "availableWidthPx": 637.8,
+        "lastLine": "手动断行样本用于暴露当前原型是否误报",
+        "lastLineWidthPx": 288,
+        "lastLineRatio": 45.2,
+        "manualBreakCount": 0,
+        "lastSegmentLineCount": 1,
+        "suspected": false,
+        "tails": [],
+        "lines": [
+          {
+            "text": "手动断行样本用于暴露当前原型是否误报",
+            "widthPx": 288,
+            "segment": 0,
+            "logicalLine": 1
+          }
+        ]
+      },
+      {
+        "key": "125:130:0.5",
+        "heading": "8. 测试检查清单",
+        "kind": "列表文本",
+        "sourceStartLine": 126,
+        "sourceEndLine": 131,
+        "domPath": "0.5",
+        "protectedContent": false,
+        "characterDiagram": false,
+        "text": "当前工具只检测可见段落，窗口外内容没有被检查",
+        "lineCount": 1,
+        "availableWidthPx": 637.8,
+        "lastLine": "当前工具只检测可见段落，窗口外内容没有被检查",
+        "lastLineWidthPx": 352,
+        "lastLineRatio": 55.2,
+        "manualBreakCount": 0,
+        "lastSegmentLineCount": 1,
+        "suspected": false,
+        "tails": [],
+        "lines": [
+          {
+            "text": "当前工具只检测可见段落，窗口外内容没有被检查",
+            "widthPx": 352,
+            "segment": 0,
+            "logicalLine": 1
+          }
+        ]
+      }
+    ],
+    "skipped": [],
+    "limitations": [
+      "表格、嵌入文档和图形不纳入测量",
+      "代码内容受保护，疑似问题不代表应改写命令或字符图",
+      "疑似阈值仅用于筛查，不代替语义判断"
+    ],
+    "layout": {
+      "contentWidthPx": 700,
+      "fontSizePx": 16,
+      "sidebarsClosed": true
+    }
+  },
+  "verifiedSidebarRestored": true,
+  "wrongWidthRejected": true,
+  "wrongSourceHashRejected": true,
+  "finalGuardValidation": "最终代码已加载；从编辑视图和打开的侧栏发起整篇检测均通过，完成后恢复模式与侧栏；旧渲染版本保护另经独立浏览器验证",
+  "response": {
+    "status": "complete",
+    "blocks": 32,
+    "suspected": 10,
+    "skipped": 0,
+    "completedAt": "2026-10-06T17:36:49.202Z"
+  },
+  "verifiedEditorRestored": true,
+  "publicationCleanup": {
+    "recordType": "redactedHistoricalRecord",
+    "removedInlineCodeBlocks": 1,
+    "validForCurrentFixture": false,
+    "note": "已删除旧行内代码样本及对应测量；其余数据仅为旧样本历史结果，统计描述修改前扫描。不能用于验收当前 fixture。新合成样本另经浏览器验证，真实 Obsidian 复验待完成。"
+  }
+}

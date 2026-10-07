@@ -1,0 +1,37 @@
+{
+  "recordType": "sanitizedHistoricalVerificationSummary",
+  "pluginVersion": "0.2.1",
+  "provenance": "历史真实 Obsidian 刷新复检；不是新运行或合成样本测量",
+  "scan": {
+    "refresh": {
+      "method": "MarkdownPreviewView.rerender(true)",
+      "sourceVerified": true
+    },
+    "full": true,
+    "reachedEnd": true,
+    "steps": 23,
+    "complete": true,
+    "missingSourceLocations": false,
+    "expectedSectionCount": 149,
+    "uncoveredSections": []
+  },
+  "blocks": 108,
+  "suspected": 0,
+  "skippedTables": 10,
+  "noteUnchanged": true,
+  "layout": {
+    "contentWidthPx": 700,
+    "fontSizePx": 16,
+    "sidebarsClosed": true
+  },
+  "repeatScan": {
+    "complete": true,
+    "blocks": 108,
+    "suspected": 0
+  },
+  "limitations": [
+    "表格不纳入文本测量",
+    "结果仅适用于历史验证布局和文件版本",
+    "已移除笔记正文、源位置、路径、校验值、时间戳和报告标识，不能独立复现历史测量"
+  ]
+}
