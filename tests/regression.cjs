@@ -38,9 +38,19 @@ const scanChecks=await page.evaluate(async()=>{
   let cancelled=false;try{await window.inspectPrototype(view,plugin,true)}catch(e){cancelled=e.message.includes('取消')}
   if(!cancelled || root.scrollTop!==17)throw Error('cancel restoration failed');
   plugin.cancelled=false;
-  view.previewMode.applyScroll=n=>{root.scrollTop=n;window.setTimeout(()=>{root.style.width='300px'},70)};
-  let widthGuard=false;try{await window.inspectPrototype(view,plugin,true)}catch(e){widthGuard=e.message.includes('宽度')}
-  if(!widthGuard || root.scrollTop!==17)throw Error('width guard failed');
+  view.previewMode.applyScroll=n=>{root.scrollTop=n};
+  let measuredViewports=0,widthError=null;
+  try{await window.inspectPrototype(view,plugin,true,(measuredRoot,result)=>{
+    if(++measuredViewports!==1)return;
+    // observe runs after collect, so the scan's width baseline already exists.
+    if(measuredRoot!==root || root.clientWidth!==360 || !result.blocks.length)throw Error('width test requires a measured viewport at 360px');
+    root.style.width='300px';
+    if(root.clientWidth!==300)throw Error('width change injection failed');
+  })}catch(e){widthError=e.message}
+  if(measuredViewports!==1)throw Error('width test must stop after the first measured viewport');
+  const widthGuard=!!widthError?.includes('阅读宽度发生变化');
+  if(!widthGuard)throw Error('width guard failed: '+(widthError || 'scan unexpectedly succeeded'));
+  if(root.scrollTop!==17)throw Error('width guard scroll restoration failed: '+root.scrollTop);
   return {fullCoverage:true,identicalParagraphsPreserved:20,repeatScanStable:true,scrollRestored:true,cancelGuard:true,widthGuard:true,codeHeadingGuard:true,staleRenderRejected:true};
 });console.log(JSON.stringify(scanChecks,null,2));
 await browser.close();
