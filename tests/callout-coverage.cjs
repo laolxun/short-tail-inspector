@@ -41,10 +41,18 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
         const plugin = {contexts, cancelled: false, app: {vault: {read: async () => source}, metadataCache: {getFileCache: () => cache}}};
         const view = {containerEl: container, file, getMode: () => 'preview', previewMode: {get: () => source, getScroll: () => root.scrollTop, rerender() {}, applyScroll: n => {root.scrollTop = n;}}};
         return {root, callout, content, callOwner, hrOwner, source, file, contexts, cache, plugin, view, hooks: {...window.scanner},
-          chapter: {kind: 'section', headingPath: ['Chapter']}, call: {kind: 'lines', startLine: 3, endLine: callEnd + 1},
+          call: {kind: 'lines', startLine: 3, endLine: callEnd + 1},
           rule: {kind: 'lines', startLine: ruleLine + 1, endLine: ruleLine + 1}};
       }
-      const run = (f, targets = [f.chapter]) => window.targetModule.scanTargets(f.view, f.plugin, targets, f.source, f.hooks);
+      const run = async (f, targets) => {
+        if (targets) return window.targetModule.scanTargets(f.view, f.plugin, targets, f.source, f.hooks);
+        // Exercise the full-note scanner; source-range tracking audits coverage only.
+        const ranges = window.targetModule.resolveTargets([{kind: 'lines', startLine: 1,
+          endLine: f.source.split('\n').length}], f.source, f.cache);
+        const tracker = new window.targetModule.TargetTracker(ranges, f.plugin, f.source, f.file.path, f.hooks);
+        const report = await f.hooks.inspect(f.view, f.plugin, true, (root, result) => tracker.observe(root, result));
+        return tracker.filter(report, 'full');
+      };
       const pseudo = (f, rule) => {
         const style = document.createElement('style');style.textContent = rule;f.root.append(style);
       };
@@ -78,12 +86,12 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
       }
       const runNested=f=>window.targetModule.scanTargets(f.view,f.plugin,[f.list],f.source,f.hooks);
       let f = fixture(), r = await run(f);
-      assert(r.targeting.coverage === 'complete' && r.targeting.scanMethod === 'visible' && !r.scan.complete, 'native callout and rule must permit real local target coverage: ' + JSON.stringify(r.targeting));
+      assert(r.targeting.coverage === 'complete' && r.targeting.scanMethod === 'full' && r.scan.complete, 'native callout and rule must permit full-note coverage: ' + JSON.stringify(r.targeting));
       assert(r.blocks.length === 3 && r.blocks[0].text === '测试'.repeat(7) + '测' && r.blocks[0].lineCount > 1 && r.blocks[0].suspected, 'callout body must actually use real short-tail measurement');
-      assert(r.targeting.targets[0].ranges[0].endLine === f.source.split('\n').length, 'structural exemption must preserve chapter range');
+      assert(r.targeting.targets[0].ranges[0].endLine === f.source.split('\n').length, 'structural exemption must preserve the full source range');
       const excluded = r.targeting.targets[0].expected.filter(s => s.textCoverage === 'excluded');
       assert(excluded.length === 1 && excluded[0].sourceText === '---' && excluded[0].startLine === f.rule.startLine && excluded[0].exclusionReason && r.sourceSha256 === 'fixture-hash', 'exclusion audit missing');
-      checks.push('nativeCalloutBodyMeasuredWithTraceableLocalHrExclusion');
+      checks.push('nativeCalloutBodyMeasuredWithTraceableFullHrExclusion');
       f=nestedListFixture();r=await runNested(f);
       assert(r.targeting.coverage==='complete'&&r.targeting.targets[0].reasons.length===0,'single nested callout must validate its own source child range: '+JSON.stringify(r.targeting));
       assert(r.blocks.length===4&&r.blocks.filter(b=>b.measurementUnit.type==='paragraph').length===4&&new Set(r.blocks.map(b=>b.key)).size===4,'nested list paragraphs must remain independent measured units');
@@ -113,7 +121,7 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
         ['visibilityHiddenPseudo', '.callout::after{content:"隐藏伪元素";visibility:hidden}']
       ]) {
         f = fixture();pseudo(f, rule);r = await run(f);
-        assert(r.targeting.coverage === 'complete' && r.targeting.scanMethod === 'visible', name + ' falsely blocked: ' + JSON.stringify(r.targeting));checks.push(name);
+        assert(r.targeting.coverage === 'complete' && r.targeting.scanMethod === 'full', name + ' falsely blocked: ' + JSON.stringify(r.targeting));checks.push(name);
       }
       f = fixture({header: '[!note]+ Custom'});f.callout.querySelector('.callout-title').style.display = 'flex';f.callout.querySelector('.callout-title-inner').textContent = '';
       r = await run(f);assert(r.targeting.coverage === 'complete', 'visible icon/fold zero-width placeholders falsely blocked');checks.push('visibleIconAndFoldPlaceholders');
@@ -170,15 +178,15 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
       await bad('duplicateCalloutContainersUncovered', f => f.callOwner.append(f.callout.cloneNode(true)));
       await bad('missingPlainParagraphStillUncovered', f => f.root.lastElementChild.replaceChildren());
       f = fixture();f.hrOwner.remove();r = await run(f);
-      assert(r.targeting.coverage === 'complete' && r.targeting.scanMethod === 'visible', 'verified structural exclusion must not require a text mapping');checks.push('pureRuleWithoutTextGroupLocalCoverage');
+      assert(r.targeting.coverage === 'complete' && r.targeting.scanMethod === 'full', 'verified structural exclusion must not require a text mapping');checks.push('pureRuleWithoutTextGroupFullCoverage');
       f = fixture();const mutateAfterLocalize = f.hooks.inspect;
       f.hooks.inspect = (...args) => {f.content.lastElementChild.remove();return mutateAfterLocalize(...args);};
-      r = await run(f);assert(r.targeting.scanMethod === 'visible' && r.targeting.coverage === 'uncovered', 'body lost between localization and scan must fail');checks.push('bodyLostAfterLocalizeUncovered');
+      r = await run(f, [f.call]);assert(r.targeting.scanMethod === 'visible' && r.targeting.coverage === 'uncovered', 'body lost between localization and scan must fail');checks.push('bodyLostAfterLocalizeUncovered');
       f = fixture();const generatedAfterLocalize = f.hooks.inspect;
       f.hooks.inspect = (...args) => {pseudo(f, '.callout::after{content:"新增未测文字"}');return generatedAfterLocalize(...args);};
-      r = await run(f);assert(r.targeting.scanMethod === 'visible' && r.targeting.coverage === 'uncovered' && r.targeting.targets[0].reasons.some(s => s.includes('::after')), 'generated text added after localization falsely covered');checks.push('generatedTextAfterLocalizeUncovered');
+      r = await run(f, [f.call]);assert(r.targeting.scanMethod === 'visible' && r.targeting.coverage === 'uncovered' && r.targeting.targets[0].reasons.some(s => s.includes('::after')), 'generated text added after localization falsely covered');checks.push('generatedTextAfterLocalizeUncovered');
       f = fixture({height: 110});r = await run(f);
-      assert(r.targeting.scanMethod === 'full' && r.scan.complete && r.targeting.coverage === 'complete' && r.blocks.length === 3, 'full fallback must measure all native callout paragraphs');checks.push('oversizedChapterFullCoverage');
+      assert(r.targeting.scanMethod === 'full' && r.scan.complete && r.targeting.coverage === 'complete' && r.blocks.length === 3, 'full fallback must measure all native callout paragraphs');checks.push('oversizedNoteFullCoverage');
       f = fixture();r = await run(f, [f.call, f.rule]);
       assert(r.targeting.scanMethod === 'full' && r.scan.complete && r.targeting.targets[0].coverage === 'complete' && r.targeting.targets[1].coverage === 'uncovered' && r.targeting.coverage === 'uncovered', 'structural-only target must not be falsely clear');checks.push('dualTargetStructuralOnlyNotClear');
       f = fixture();r = await run(f, [f.call, {kind: 'lines', startLine: f.rule.endLine + 2, endLine: f.rule.endLine + 2}]);

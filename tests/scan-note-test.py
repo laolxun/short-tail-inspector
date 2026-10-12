@@ -19,7 +19,7 @@ class CLITests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         self.note = self.root / 'synthetic.md'
-        self.note.write_text('## 章节\n\n合成段落\n', encoding='utf-8')
+        self.note.write_text('标题\n\n合成段落\n结束\n', encoding='utf-8')
         self.plugin = self.root / '.obsidian/plugins/short-tail-inspector'
         self.plugin.mkdir(parents=True)
         (self.plugin / 'main.js').write_text('// synthetic installation marker', encoding='utf-8')
@@ -45,12 +45,19 @@ class CLITests(unittest.TestCase):
                 response = {'id': request['id'], 'status': status, 'archivePath': relative}
                 if request['schemaVersion'] == 2:
                     coverage = 'uncovered' if bad_coverage or status == 'incomplete' else 'complete'
-                    targets = [{'requested': target, 'coverage': coverage} for target in request['targets']]
+                    targets = [{'requested': target, 'coverage': coverage, 'resolved': True,
+                                'ranges': [{'startLine': target['startLine'], 'endLine': target['endLine']}]
+                                if target.get('kind') == 'lines' else []} for target in request['targets']]
                     report['schemaVersion'] = 3
+                    report['scan'] = {'full': True, 'complete': True}
+                    report['documentCoverage'] = 'complete'
                     report['targeting'] = {'targets': targets, 'coverage': coverage,
-                                           'result': 'uncovered' if coverage == 'uncovered' else 'clear'}
+                                           'result': 'uncovered' if coverage == 'uncovered' else 'clear',
+                                           'completionScope': 'targets', 'scanMethod': 'full'}
                     response.update(schemaVersion=2, targetCoverage=coverage,
-                                    targetResult=report['targeting']['result'], targets=targets)
+                                    targetResult=report['targeting']['result'], targets=targets,
+                                    sourceSha256=request['expectedSourceSha256'], completionScope='targets',
+                                    scanMethod='full', documentCoverage='complete')
                 if mutate:
                     mutate(report, response)
                 archive.write_text(json.dumps(report), encoding='utf-8')
@@ -110,11 +117,16 @@ class CLITests(unittest.TestCase):
         self.assertEqual(self.request['schemaVersion'], 2)
         self.assertEqual([t['startLine'] for t in self.request['targets']], [1, 3])
 
-    def test_section_paragraph_and_nested_json(self):
-        result = self.invoke(['--section', '章节', '--paragraph', '合成段落', '--target',
-                              '{"kind":"section","headingPath":["章","节"],"startLine":1,"endLine":3}'])
+    def test_paragraph_and_exact_line_targets(self):
+        result = self.invoke(['--paragraph', '合成段落', '--lines', '3:3'])
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(len(self.request['targets']), 3)
+        self.assertEqual([target['kind'] for target in self.request['targets']], ['lines', 'paragraph'])
+
+    def test_chapter_targets_are_rejected(self):
+        for extra in [('--section', '章节'), ('--target', '{"kind":"section","headingPath":["章节"]}')]:
+            result = subprocess.run([sys.executable, '-B', str(SCRIPT), 'synthetic.md', '--vault', str(self.root), *extra], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertFalse((self.plugin / 'request.json').exists())
 
     def test_uncovered_exits_nonzero(self):
         result = self.invoke(['--lines', '3:3'], status='incomplete')

@@ -12,19 +12,19 @@ legacy_tests = runpy.run_path(str(HERE / 'scan-note-test.py'))
 SCRIPT = HERE.parent / 'scan-note.py'
 
 
-class ChapterWorkflowTests(unittest.TestCase):
+class TargetWorkflowTests(unittest.TestCase):
     setUp = legacy_tests['CLITests'].setUp
     invoke = legacy_tests['CLITests'].invoke
 
     def guarded_args(self):
-        return ['--target', '{"kind":"section","headingPath":["章节"]}',
+        return ['--lines', '1:4',
                 '--expected-source-sha256', hashlib.sha256(self.note.read_bytes()).hexdigest(),
-                '--expected-section-range', '1:4', '--include-request']
+                '--include-request']
 
     def guarded(self, mutate=None, **kwargs):
         def response(report, reply):
             target = report['targeting']['targets'][0]
-            target.update(resolved=True, ranges=[{'startLine': 1, 'endLine': 4}])
+            target.update(resolved=True, ranges=[{'startLine': 1, 'endLine': 4}], expected=[{'startLine': 1, 'endLine': 1, 'type': 'paragraph'}])
             report['scan'] = {'full': True, 'complete': True}
             report['targeting'].update(completionScope='targets', scanMethod='full')
             reply.update(sourceSha256=report['sourceSha256'], completionScope='targets', scanMethod='full')
@@ -39,14 +39,13 @@ class ChapterWorkflowTests(unittest.TestCase):
         self.assertEqual(output['request'], self.request)
         self.assertEqual(output['response']['id'], self.request['id'])
         self.assertEqual(output['response']['targetCoverage'], 'complete')
-        self.assertEqual(output['sectionAcceptance']['coverage'], 'covered')
-        self.assertTrue(output['sectionAcceptance']['rangeMatched'])
-        self.assertNotIn('startLine', self.request['targets'][0])
+        self.assertEqual(output['response']['targets'][0]['ranges'], [{'startLine': 1, 'endLine': 4}])
+        self.assertEqual(self.request['targets'][0]['kind'], 'lines')
 
     def test_full_complete_with_uncovered_target_is_not_covered(self):
         result = self.guarded(status='incomplete')
         self.assertEqual(result.returncode, 1, result.stderr)
-        self.assertEqual(json.loads(result.stdout)['sectionAcceptance']['coverage'], 'uncovered')
+        self.assertEqual(json.loads(result.stdout)['response']['targetCoverage'], 'uncovered')
 
     def test_visible_complete_is_covered_without_full_complete(self):
         def mutate(report, reply):
@@ -59,7 +58,7 @@ class ChapterWorkflowTests(unittest.TestCase):
         result = self.guarded(lambda report, reply: report['targeting']['targets'][0].update(
             ranges=[{'startLine': 1, 'endLine': 3}]))
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn('Section range', result.stderr)
+        self.assertIn('Target range', result.stderr)
 
     def test_boolean_line_number_is_not_an_integer_range(self):
         result = self.guarded(lambda report, reply: report['targeting']['targets'][0].update(
@@ -82,7 +81,7 @@ class ChapterWorkflowTests(unittest.TestCase):
 
     def test_wrong_target_identity_is_rejected(self):
         result = self.guarded(lambda report, reply: report['targeting']['targets'][0].update(
-            requested={'kind': 'section', 'headingPath': ['别章']}))
+            requested={'kind': 'lines', 'startLine': 2, 'endLine': 4}))
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('Target identity', result.stderr)
 
@@ -107,8 +106,7 @@ class ChapterWorkflowTests(unittest.TestCase):
         result = self.guarded(mutate, status='incomplete')
         self.assertEqual(result.returncode, 1, result.stderr)
         output = json.loads(result.stdout)
-        self.assertEqual(output['sectionAcceptance']['coverage'], 'uncovered')
-        self.assertFalse(output['sectionAcceptance']['rangeMatched'])
+        self.assertEqual(output['response']['targetCoverage'], 'uncovered')
         self.assertEqual(output['response']['targets'][0]['ranges'], [])
 
     def test_suspected_is_covered_without_becoming_clear(self):
@@ -117,13 +115,13 @@ class ChapterWorkflowTests(unittest.TestCase):
         result = self.guarded(mutate)
         self.assertEqual(result.returncode, 0, result.stderr)
         output = json.loads(result.stdout)
-        self.assertEqual(output['sectionAcceptance']['coverage'], 'covered')
+        self.assertEqual(output['response']['targetCoverage'], 'complete')
         self.assertEqual(output['response']['targetResult'], 'suspected')
 
     def test_error_does_not_produce_covered(self):
         result = self.guarded(status='error')
         self.assertEqual(result.returncode, 1, result.stderr)
-        self.assertEqual(json.loads(result.stdout)['sectionAcceptance']['coverage'], 'uncovered')
+        self.assertEqual(json.loads(result.stdout)['response']['status'], 'error')
 
     def test_scope_and_method_must_match_archive(self):
         for field, value in [('completionScope', 'full'), ('scanMethod', 'visible')]:
@@ -133,7 +131,7 @@ class ChapterWorkflowTests(unittest.TestCase):
                     self.setUp()
                 result = self.guarded(lambda report, reply: reply.update({field: value}))
                 self.assertNotEqual(result.returncode, 0)
-                self.assertIn('Section ' + field + ' mismatch', result.stderr)
+                self.assertIn('mismatch', result.stderr)
 
     def test_full_fallback_incomplete_cannot_be_covered(self):
         result = self.guarded(lambda report, reply: report['scan'].update(complete=False))
@@ -151,7 +149,7 @@ class ChapterWorkflowTests(unittest.TestCase):
         result = self.guarded(self.scoped_complete)
         self.assertEqual(result.returncode, 0, result.stderr)
         output = json.loads(result.stdout)
-        self.assertEqual(output['sectionAcceptance']['coverage'], 'covered')
+        self.assertEqual(output['response']['targetCoverage'], 'complete')
         self.assertEqual(output['response']['documentCoverage'], 'incomplete')
 
     def test_document_coverage_mismatch_is_rejected(self):
@@ -161,37 +159,6 @@ class ChapterWorkflowTests(unittest.TestCase):
         result = self.guarded(mutate)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('Document coverage mismatch', result.stderr)
-
-    def test_ready_partial_section_accepts_mapping_gaps(self):
-        def mutate(report, reply):
-            self.scoped_complete(report, reply)
-            report['targeting']['targets'][0].update(
-                sectionPlan={'status': 'ready'}, mappingPrecision='partial',
-                mappingGaps=[{'kind': 'text', 'possibleRange': None}])
-        result = self.guarded(mutate)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(json.loads(result.stdout)['sectionAcceptance']['coverage'], 'covered')
-
-    def test_unavailable_section_accepts_legacy_exact_coverage(self):
-        def mutate(report, reply):
-            self.scoped_complete(report, reply)
-            report['targeting']['targets'][0]['sectionPlan'] = {'status': 'unavailable'}
-        result = self.guarded(mutate)
-        self.assertEqual(result.returncode, 0, result.stderr)
-
-    def test_partial_mapping_requires_ready_section(self):
-        for status in ('unavailable', None):
-            with self.subTest(status=status):
-                if (self.plugin / 'request.json').exists():
-                    self.setUp()
-                def mutate(report, reply):
-                    self.scoped_complete(report, reply)
-                    report['targeting']['targets'][0].update(
-                        sectionPlan={'status': status}, mappingPrecision='partial',
-                        mappingGaps=[{'kind': 'text', 'possibleRange': None}])
-                result = self.guarded(mutate)
-                self.assertNotEqual(result.returncode, 0)
-                self.assertIn('coverage evidence is incomplete', result.stderr)
 
     def test_scoped_complete_requires_target_evidence(self):
         for field, value in [('mappingGaps', [{'kind': 'text', 'possibleRange': None}]),
@@ -208,7 +175,7 @@ class ChapterWorkflowTests(unittest.TestCase):
 
     def test_source_change_before_request_writes_nothing(self):
         args = self.guarded_args()
-        self.note.write_text('## 章节\n\n插入一行\n合成段落\n', encoding='utf-8')
+        self.note.write_text('标题\n新内容\n合成段落\n结束\n', encoding='utf-8')
         result = subprocess.run([sys.executable, '-B', str(SCRIPT), 'synthetic.md',
                                  '--vault', str(self.root), *args], capture_output=True, text=True)
         self.assertEqual(result.returncode, 2, result.stderr)
@@ -217,28 +184,11 @@ class ChapterWorkflowTests(unittest.TestCase):
 
     def test_source_change_after_scan_is_rejected(self):
         def mutate(report, reply):
-            self.note.write_text('## 章节\n新内容\n', encoding='utf-8')
+            self.note.write_text('新内容\n', encoding='utf-8')
         result = self.guarded(mutate)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('Source changed', result.stderr)
 
-    def test_guard_rejects_missing_hash_explicit_ranges_and_multiple_targets(self):
-        for extra in [
-            ['--section', '章节', '--expected-section-range', '1:4'],
-            ['--target', '{"kind":"section","headingPath":["章节"],"startLine":1,"endLine":4}',
-             '--expected-source-sha256', 'a' * 64, '--expected-section-range', '1:4'],
-            ['--section', '章节', '--section', '别章', '--expected-source-sha256', 'a' * 64,
-             '--expected-section-range', '1:4'],
-            ['--section', '章节', '--expected-source-sha256', 'a' * 64, '--expected-section-range', '0:4'],
-            ['--section', '章节', '--expected-source-sha256', 'a' * 64, '--expected-section-range', '1:5'],
-            ['--section', '章节', '--expected-source-sha256', 'a' * 64, '--expected-section-range', '3:1'],
-            ['--section', '章节', '--expected-source-sha256', 'a' * 64, '--expected-section-range', '1:2:3'],
-            ['--section', '章节', '--expected-source-sha256', 'invalid', '--expected-section-range', '1:4'],
-        ]:
-            result = subprocess.run([sys.executable, '-B', str(SCRIPT), 'synthetic.md',
-                                     '--vault', str(self.root), *extra], capture_output=True, text=True)
-            self.assertEqual(result.returncode, 2, result.stderr)
-            self.assertFalse((self.plugin / 'request.json').exists())
 
 
 if __name__ == '__main__':

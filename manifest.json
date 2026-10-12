@@ -1,1 +1,1 @@
-{"id":"short-tail-inspector","name":"短尾行检测原型","version":"0.2.2","minAppVersion":"1.6.0","description":"按当前阅读视图的实际文字位置检测疑似短尾行，不改写笔记。","author":"Local prototype","isDesktopOnly":true}
+{"id":"short-tail-inspector","name":"短尾行检测原型","version":"0.2.3","minAppVersion":"1.6.0","description":"按当前阅读视图的实际文字位置检测疑似短尾行，不改写笔记。","author":"Local prototype","isDesktopOnly":true}

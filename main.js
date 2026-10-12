@@ -1,5 +1,5 @@
 const {Plugin, MarkdownView, Modal, Notice} = require('obsidian');
-const VERSION='0.2.2', THRESHOLD=0.25;
+const VERSION='0.2.3', THRESHOLD=0.25;
 const round=n=>Math.round(n*10)/10;
 const SELECTOR='h1,h2,h3,h4,h5,h6,p,pre,li';
 class LayoutContexts {
@@ -148,11 +148,15 @@ function collect(root,contexts,source,path) {
     if(sec && sec.sourcePath!==path)continue;
     if(sec)ranges.push([sec.start,sec.end]);
     if(/^H[1-6]$/.test(el.tagName))continue;
-    if(el.tagName==='P' && el.closest('pre'))continue;
+    if(el.tagName!=='PRE' && el.closest('pre'))continue;
     if(el.tagName==='LI' && el.querySelector(':scope > p'))continue;
     const heading=nearestHeading(source,sec?.start??null,fallbackHeading);
     const location=sec?{sourceStartLine:sec.start+1,sourceEndLine:sec.end+1,domPath:elementPath(el,sec.owner)}:{sourceStartLine:null,sourceEndLine:null,domPath:null};
     const key=sec?`${sec.start}:${sec.end}:${location.domPath}`:null;
+    if(el.tagName==='PRE') {
+      skipped.push({key:key||`code:${elementPath(el,root)}`,heading,kind:'代码块',...location,reason:'代码块内容受保护，跳过短尾检测'});
+      continue;
+    }
     try {
       const code=el.tagName==='PRE';
       const target=code?(el.querySelector('code')||el):el;
@@ -254,6 +258,8 @@ class ResultModal extends Modal {
   constructor(app,report,save){super(app);this.report=report;this.save=save;}
   onOpen() {
     const {contentEl}=this,r=this.report;
+    contentEl.style.setProperty('user-select','text');
+    contentEl.style.setProperty('-webkit-user-select','text');
     contentEl.createEl('h2',{text:'短尾行检测原型 '+VERSION});
     const suspectedBlocks=r.blocks.filter(b=>b.suspected), suspected=suspectedBlocks.flatMap(b=>(b.tails||[]).map(t=>({block:b,tail:t}))), normal=r.blocks.filter(b=>!b.suspected);
     contentEl.createEl('p',{text:`${r.file.split('/').pop()} · ${r.scan.full?'全文逐屏':'当前可视区域'} · 已测 ${r.blocks.length} · 疑似 ${suspectedBlocks.length} · 跳过 ${r.skipped.length}`});
@@ -283,6 +289,10 @@ class ResultModal extends Modal {
     }
     const limits=contentEl.createEl('details');limits.createEl('summary',{text:'限制与检测范围'});
     for(const s of r.limitations)limits.createEl('p',{text:s});
+    for(const control of contentEl.querySelectorAll('button,summary')) {
+      control.style.setProperty('user-select','none');
+      control.style.setProperty('-webkit-user-select','none');
+    }
   }
   onClose(){this.contentEl.empty();}
 }

@@ -50,23 +50,20 @@ def parse_targets(args, parser, line_count):
         except ValueError:
             parser.error('--lines must be START:END (1-based, inclusive)')
         targets.append({'kind': 'lines', 'startLine': start, 'endLine': end})
-    targets.extend({'kind': 'section', 'headingPath': [title]} for title in args.section)
     targets.extend({'kind': 'paragraph', 'text': text} for text in args.paragraph)
     if len(targets) > 100:
         parser.error('At most 100 targets are allowed')
     for target in targets:
-        if target.get('kind') not in ('section', 'paragraph', 'lines'):
-            parser.error('Target kind must be section, paragraph or lines')
+        if target.get('kind') not in ('paragraph', 'lines'):
+            parser.error('Target kind must be paragraph or lines')
+        if 'headingPath' in target:
+            parser.error('headingPath targets are not supported; use exact source lines or paragraph text')
         if 'startLine' in target or 'endLine' in target:
             start, end = target.get('startLine'), target.get('endLine')
             if type(start) is not int or type(end) is not int or not 1 <= start <= end <= line_count:
                 parser.error('Target lines must be a valid 1-based inclusive source range')
-        elif not (target.get('kind') == 'section' and target.get('headingPath') or
-                  target.get('kind') == 'paragraph' and target.get('text')):
-            parser.error('Target requires source lines, headingPath or paragraph text')
-        if 'headingPath' in target and (not isinstance(target['headingPath'], list) or
-                not target['headingPath'] or any(not isinstance(s, str) or not s.strip() for s in target['headingPath'])):
-            parser.error('headingPath must be a nonempty array of title strings')
+        elif not (target.get('kind') == 'paragraph' and target.get('text')):
+            parser.error('Target requires source lines or paragraph text')
         if 'text' in target and (not isinstance(target['text'], str) or not target['text'].strip()):
             parser.error('Paragraph text must be a nonempty source string')
     return targets
@@ -95,15 +92,33 @@ def verify_report(response, request, root, plugin):
         targeting = report.get('targeting', {})
         if response.get('schemaVersion') != 2 or report.get('schemaVersion') != 3 or not isinstance(targeting, dict):
             raise SystemExit('Plugin did not return the targeted-scan protocol')
+        if response.get('sourceSha256') != request['expectedSourceSha256']:
+            raise SystemExit('Response identity mismatch: sourceSha256')
+        if response.get('completionScope') != 'targets' or targeting.get('completionScope') != 'targets':
+            raise SystemExit('Target completionScope mismatch')
+        method = response.get('scanMethod')
+        scan = report.get('scan', {})
+        if (method not in ('visible', 'full') or targeting.get('scanMethod') != method or
+                scan.get('full') is not (method == 'full')):
+            raise SystemExit('Target scanMethod mismatch')
         targets = targeting.get('targets')
         if (not isinstance(targets, list) or any(not isinstance(t, dict) for t in targets) or
                 json.dumps([t.get('requested') for t in targets], sort_keys=True) != json.dumps(request['targets'], sort_keys=True) or
                 json.dumps(response.get('targets'), sort_keys=True) != json.dumps(targets, sort_keys=True)):
             raise SystemExit('Target identity mismatch between request, response and archive')
+        for target in targets:
+            requested = target.get('requested') or {}
+            if (requested.get('kind') == 'lines' and target.get('resolved') is True and
+                    json.dumps(target.get('ranges'), sort_keys=True) != json.dumps(
+                        [{key: requested[key] for key in ('startLine', 'endLine')}], sort_keys=True)):
+                raise SystemExit('Target range differs from the requested source lines')
         if response.get('status') == 'complete' and (response.get('targetCoverage') != 'complete' or
                 targeting.get('coverage') != 'complete' or targeting.get('result') not in ('clear', 'suspected') or
-                any(t.get('coverage') != 'complete' for t in targets)):
+                any(t.get('coverage') != 'complete' or t.get('resolved') is not True for t in targets)):
             raise SystemExit('Target coverage is incomplete; complete/clear is not valid')
+        if (response.get('status') == 'complete' and method == 'full' and scan.get('complete') is not True and
+                targeting.get('coverageBasis') != 'target-source-blocks-v1'):
+            raise SystemExit('Full scan is incomplete without scoped target coverage evidence')
         if (targeting.get('result') not in ('clear', 'suspected', 'uncovered') or
                 response.get('targetResult') != targeting.get('result')):
             raise SystemExit('Target result mismatch between response and archive')
@@ -119,10 +134,7 @@ def verify_report(response, request, root, plugin):
             if report.get('documentCoverage') != document_coverage or response.get('documentCoverage') != document_coverage:
                 raise SystemExit('Document coverage mismatch between response and archive')
             for target in targets:
-                is_section = (target.get('requested') or {}).get('kind') == 'section'
-                section_plan_ready = (target.get('sectionPlan') or {}).get('status') == 'ready'
-                mappings_valid = (not target.get('mappingGaps') or
-                                  (is_section and section_plan_ready and target.get('mappingPrecision') == 'partial'))
+                mappings_valid = not target.get('mappingGaps')
                 if target.get('coverage') == 'complete' and (
                         target.get('resolved') is not True or not isinstance(target.get('ranges'), list) or len(target['ranges']) != 1 or
                         not isinstance(target.get('expected'), list) or not target['expected'] or
@@ -132,14 +144,14 @@ def verify_report(response, request, root, plugin):
     return report
 
 
-def section_range_matches(report, expected):
+def target_range_matches(report, expected):
     targets = report.get('targeting', {}).get('targets', []) if report else []
     return (len(targets) == 1 and targets[0].get('resolved') is True and
             json.dumps(targets[0].get('ranges'), sort_keys=True) == json.dumps([expected], sort_keys=True))
 
 
-def verify_section_report(response, request, report, expected, label='Section'):
-    """Bind plugin-resolved boundaries to a caller's source-based plan."""
+def verify_target_report(response, request, report, expected, label='Target'):
+    """Bind the plugin's resolved exact source range to the request."""
     targeting = report['targeting']
     if response.get('sourceSha256') != request['expectedSourceSha256']:
         raise SystemExit('Response identity mismatch: sourceSha256')
@@ -151,8 +163,8 @@ def verify_section_report(response, request, report, expected, label='Section'):
             scan.get('full') is not (method == 'full')):
         raise SystemExit(label + ' scanMethod mismatch')
     if response['status'] == 'complete':
-        if not section_range_matches(report, expected):
-            raise SystemExit(label + ' range is unresolved or differs from the source plan')
+        if not target_range_matches(report, expected):
+            raise SystemExit(label + ' range is unresolved or differs from the requested source range')
         if (method == 'full' and scan.get('complete') is not True and
                 targeting.get('coverageBasis') != 'target-source-blocks-v1'):
             raise SystemExit(label + ' full fallback is incomplete')
@@ -162,9 +174,9 @@ def verify_paragraph_report(response, request, report, text):
     """Select one complete P node only after its entire source container passes."""
     requested = request['targets'][0]
     expected = {key: requested[key] for key in ('startLine', 'endLine')}
-    verify_section_report(response, request, report, expected, 'Paragraph container')
+    verify_target_report(response, request, report, expected, 'Paragraph container')
     acceptance = {'coverage': 'uncovered', 'containerCoverage': response['targetCoverage'],
-                  'requestedText': text, 'rangeMatched': section_range_matches(report, expected),
+                  'requestedText': text, 'rangeMatched': target_range_matches(report, expected),
                   'selectedBlock': None}
     if response['status'] != 'complete':
         return acceptance
@@ -224,10 +236,8 @@ def main():
     parser.add_argument('--timeout', type=float, default=30)
     parser.add_argument('--target', action='append', default=[], help='Target JSON object; repeat for multiple changes')
     parser.add_argument('--lines', action='append', default=[], help='1-based inclusive START:END; repeat for multiple changes')
-    parser.add_argument('--section', action='append', default=[], help='Top-level section title; use --target for a nested headingPath')
     parser.add_argument('--paragraph', action='append', default=[], help='Exact paragraph source text')
     parser.add_argument('--expected-source-sha256', help='Require the exact source version used to locate targets')
-    parser.add_argument('--expected-section-range', help='Verify one path-only section against caller-derived START:END')
     parser.add_argument('--include-request', action='store_true', help='Output original request and response in an envelope')
     parser.add_argument('--select-paragraph', help='Exact complete rendered paragraph text, not a location fragment; strict container acceptance')
     args = parser.parse_args()
@@ -239,18 +249,6 @@ def main():
         parser.error('Note must exist inside the vault')
     source = note.read_bytes()
     targets = parse_targets(args, parser, len(source.decode('utf-8').split('\n')))
-    expected_range = None
-    if args.expected_section_range is not None:
-        if (not args.expected_source_sha256 or len(targets) != 1 or targets[0]['kind'] != 'section' or
-                not targets[0].get('headingPath') or set(targets[0]) != {'kind', 'headingPath'}):
-            parser.error('Section range protection requires a source hash and one path-only section target')
-        try:
-            start, end = (int(part) for part in args.expected_section_range.split(':'))
-        except ValueError:
-            parser.error('Expected section range must be START:END')
-        if not 1 <= start <= end <= len(source.decode('utf-8').split('\n')):
-            parser.error('Expected section range must be a valid 1-based inclusive source range')
-        expected_range = {'startLine': start, 'endLine': end}
     source_hash = hashlib.sha256(source).hexdigest()
     if args.expected_source_sha256 is not None:
         if len(args.expected_source_sha256) != 64 or any(c not in '0123456789abcdef' for c in args.expected_source_sha256):
@@ -259,7 +257,7 @@ def main():
             parser.error('Source changed since target location; reread and resolve the target')
     if args.select_paragraph is not None:
         if (not args.select_paragraph.strip() or not args.expected_source_sha256 or not args.include_request or
-                args.expected_section_range is not None or len(targets) != 1 or
+                len(targets) != 1 or
                 targets[0].get('kind') != 'lines' or set(targets[0]) != {'kind', 'startLine', 'endLine', 'text'}):
             parser.error('Paragraph selection requires a source hash, include-request and one lines target with exact source text')
         target = targets[0]
@@ -288,17 +286,11 @@ def main():
             paragraph_acceptance = {'coverage': 'uncovered', 'selectedBlock': None}
             if response.get('status') in ('complete', 'incomplete'):
                 report = verify_report(response, request, root, plugin)
-                if expected_range is not None:
-                    verify_section_report(response, request, report, expected_range)
                 if args.select_paragraph is not None:
                     paragraph_acceptance = verify_paragraph_report(response, request, report, args.select_paragraph)
             if args.expected_source_sha256 is not None and hashlib.sha256(note.read_bytes()).hexdigest() != source_hash:
                 raise SystemExit('Source changed before response acceptance; reread and resolve the target')
             output = {'request': request, 'response': response} if args.include_request else response
-            if args.include_request and expected_range is not None:
-                output['sectionAcceptance'] = {
-                    'coverage': 'covered' if response.get('status') == 'complete' else 'uncovered',
-                    'expectedRange': expected_range, 'rangeMatched': section_range_matches(report, expected_range)}
             if args.select_paragraph is not None:
                 output['paragraphAcceptance'] = paragraph_acceptance
             print(json.dumps(output, ensure_ascii=False, indent=2))

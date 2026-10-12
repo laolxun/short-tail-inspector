@@ -32,23 +32,9 @@ function pureThematicBreak(section, lines, sections) {
 function resolveTargets(input, source, cache = {}) {
   if (!Array.isArray(input) || !input.length || input.length > 100) throw new Error('targets 必须包含 1～100 个目标');
   const lines = source.split('\n'), sections = (cache.sections || []).filter(s => s.type !== 'yaml');
-  const headings = [], stack = [];
-  for (const heading of cache.headings || []) {
-    while (stack.length && stack[stack.length - 1].level >= heading.level) stack.pop();
-    const line = heading.position.start.line;
-    const atx = (lines[line] || '').match(/^ {0,3}(#{1,6})(?:[\t ]+|$)(.*)$/);
-    const setext = (lines[line + 1] || '').match(/^ {0,3}(=+|-+)[\t ]*$/);
-    const level = atx ? atx[1].length : setext ? (setext[1][0] === '=' ? 1 : 2) : null;
-    const raw = atx ? atx[2].replace(/\s+#+\s*$/, '').trim() : (lines[line] || '').trim();
-    const isHeadingSection = sections.some(s => s.type === 'heading' && s.position.start.line <= line && s.position.end.line >= line);
-    const current = isHeadingSection && raw === heading.heading && level === heading.level && stack.every(h => h.current);
-    const entry = {...heading, path: [...stack.map(h => h.heading), heading.heading], current};
-    headings.push(entry);stack.push(entry);
-  }
   return input.map((target, index) => {
-    if (!target || !['section', 'paragraph', 'lines'].includes(target.kind)) throw new Error('目标 kind 必须是 section、paragraph 或 lines');
-    if (target.headingPath !== undefined && (!Array.isArray(target.headingPath) || !target.headingPath.length ||
-        target.headingPath.some(s => typeof s !== 'string' || !s.trim()))) throw new Error('headingPath 必须是非空标题字符串数组');
+    if (!target || !['paragraph', 'lines'].includes(target.kind)) throw new Error('目标 kind 必须是 paragraph 或 lines；不支持章节目标');
+    if (target.headingPath !== undefined) throw new Error('不支持 headingPath；请使用精确源码行或段落目标');
     if (target.text !== undefined && (typeof target.text !== 'string' || !target.text.trim())) throw new Error('段落 text 必须是非空源码文本');
     const explicit = target.startLine !== undefined || target.endLine !== undefined;
     let ranges = [], reason = null;
@@ -56,24 +42,11 @@ function resolveTargets(input, source, cache = {}) {
       if (!Number.isInteger(target.startLine) || !Number.isInteger(target.endLine) ||
           target.startLine < 1 || target.endLine < target.startLine || target.endLine > lines.length) throw new Error('目标源码行必须是有效的 1-based 闭区间');
       ranges = [{startLine: target.startLine, endLine: target.endLine}];
-    } else if (target.kind === 'section' && target.headingPath) {
-      const matches = headings.filter(h => h.current && JSON.stringify(h.path) === JSON.stringify(target.headingPath));
-      ranges = matches.map(h => {
-        const next = headings.find(n => n.position.start.line > h.position.start.line && n.level <= h.level);
-        if (headings.some(n => n.position.start.line > h.position.start.line &&
-            (!next || n.position.start.line <= next.position.start.line) && !n.current)) reason = '章节边界缓存与源码不一致';
-        return {startLine: h.position.start.line + 1, endLine: next ? next.position.start.line : lines.length};
-      });
-      if (matches.length !== 1) reason = '章节缺失或标题路径不唯一';
     } else if (target.kind === 'paragraph' && target.text) {
       ranges = sections.filter(s => s.type === 'paragraph' &&
         lines.slice(s.position.start.line, s.position.end.line + 1).join('\n') === target.text).map(sectionRange);
       if (ranges.length !== 1) reason = '段落缺失或源码文本不唯一';
-    } else throw new Error('目标需要 startLine/endLine，或章节 headingPath，或段落 text');
-    if (explicit && target.headingPath) {
-      const previous = headings.filter(h => h.position.start.line < target.startLine).at(-1);
-      if (!previous?.current || JSON.stringify(previous.path) !== JSON.stringify(target.headingPath)) reason = '源码行与章节路径不一致';
-    }
+    } else throw new Error('目标需要 startLine/endLine，或段落 text');
     if (explicit && target.text && lines.slice(target.startLine - 1, target.endLine).join('\n') !== target.text) reason = '源码行与段落文本不一致';
     const expected = sections.filter(s => ranges.some(r => intersects(r, sectionRange(s))))
       .map(s => ({...sectionRange(s), type: s.type,
@@ -433,33 +406,9 @@ class TargetTracker {
     Object.assign(this, {targets, plugin, source, file, hooks});
     this.ranges = targets.flatMap(target => target.ranges);
     this.groups = new Map();this.measured = new Set();this.failed = new Set();this.mappingGaps = new Map();this.gapKeys = new WeakMap();
-    this.headingSnapshots = [];this.sectionSnapshots = new Map();this.renderedSections = new Map();
   }
   observe(root, result) {
     this.root = root;
-    // Immutable observations survive virtual rendering and DOM node reuse.
-    // Never use detached nodes as current boundary owners.
-    try {
-      if (this.targets.some(target => target.requested.kind === 'section')) {
-        const state = {step: this.headingSnapshots.length + 1, scrollTop: root.scrollTop,
-          scrollHeight: root.scrollHeight, clientHeight: root.clientHeight};
-        const candidates = [...root.querySelectorAll('h1,h2,h3,h4,h5,h6')]
-          .filter(el => !el.closest('.frontmatter,.metadata-container,.markdown-embed'))
-          .map((el, domIndex) => ({tagName: el.tagName, textContent: el.textContent,
-            level: Number(el.tagName.slice(1)), domIndex, domPath: this.hooks.elementPath(el, root)}));
-        this.headingSnapshots.push({state, candidates});
-        for (const target of this.targets) {
-          if (target.requested.kind !== 'section') continue;
-          const plan = this.liveSectionPlanDiagnostic(target);
-          const snapshots = this.sectionSnapshots.get(target.index) || [];
-          snapshots.push({...plan, scanState: state});
-          this.sectionSnapshots.set(target.index, snapshots);
-        }
-      }
-    } catch {
-      // Diagnostic failures cannot change scanning or acceptance.
-      this.headingEvidenceFailed = true;
-    }
     const current = renderGroups(root, this.plugin, this.source, this.file, this.hooks, this.ranges);
     for (const gap of current.mappingGaps) {
       const node = gap.node;
@@ -492,28 +441,6 @@ class TargetTracker {
         ? {startLine: section.start + 1, endLine: section.end + 1} : scope(key.node);
       if (range) this.mappingGaps.set(key, {...gap, possibleRange: range, state: 'located'});
     }
-    // Bind obligations while their original DOM identity/position is still
-    // valid. Detached or recycled nodes cannot acquire retrospective immunity.
-    for (const target of this.targets) {
-      if (target.requested.kind !== 'section') continue;
-      let plan;
-      try { plan = this.sectionPlan(target, root); } catch { continue; }
-      if (plan.status !== 'ready') continue;
-      for (const [key] of this.mappingGaps) {
-        if (!this.sameGapPosition(key, root)) continue;
-        const node = key.node, start = plan.startOwner, end = plan.endOwner;
-        let relation = null;
-        if (start === node || start.contains(node)) relation = 'inside';
-        else if (node.contains(start) || node.contains(end)) continue;
-        else if (end === node || end.contains(node)) relation = 'outside';
-        else if ((start.compareDocumentPosition(node) & 4) && (node.compareDocumentPosition(end) & 4)) relation = 'inside';
-        else if ((node.compareDocumentPosition(start) & 4) || (end.compareDocumentPosition(node) & 4)) relation = 'outside';
-        if (!relation) continue;
-        if (!key.sectionMembership) key.sectionMembership = new Map();
-        const evidence = key.sectionMembership.get(target.index) || new Set();
-        evidence.add(relation);key.sectionMembership.set(target.index, evidence);
-      }
-    }
     for (const [key, group] of current.groups) {
       const previous = this.groups.get(key);
       if (previous) {
@@ -523,41 +450,6 @@ class TargetTracker {
         for (const el of group.callouts) previous.callouts.add(el);
         previous.calloutIssues.push(...group.calloutIssues);
       } else this.groups.set(key, group);
-    }
-    for (const target of this.targets) {
-      if (target.requested.kind !== 'section') continue;
-      let plan;
-      try { plan = this.sectionPlan(target, root); } catch { continue; }
-      const snapshots = this.renderedSections.get(target.index) || [];
-      if (plan?.status === 'ready' && !snapshots.length) {
-        const entries = [];
-        for (let owner = plan.startOwner; owner && owner !== plan.endOwner; owner = owner.nextSibling) {
-          if (owner.nodeType !== 1) {if (owner.textContent.trim()) entries.push({type: 'unknown', nodes: []});continue;}
-          const content = owner.matches('h1,h2,h3,h4,h5,h6,p,pre,blockquote,ul,ol,table,hr,.callout')
-            ? owner : owner.querySelector('h1,h2,h3,h4,h5,h6') || owner.firstElementChild;
-          const type = content?.matches('.callout') ? 'callout' : content?.matches('h1,h2,h3,h4,h5,h6') ? 'heading' :
-            content?.matches('p') ? 'paragraph' : content?.matches('pre') ? 'code' : content?.matches('blockquote') ? 'blockquote' :
-            content?.matches('ul,ol') ? 'list' : content?.matches('hr') ? 'thematicBreak' : content?.matches('table') ? 'table' : 'unknown';
-          const candidates = [owner, ...owner.querySelectorAll(this.hooks.SELECTOR)].filter(el =>
-            el.matches(this.hooks.SELECTOR) && !/^H[1-6]$/.test(el.tagName) &&
-            !el.closest('table,.frontmatter,.metadata-container,.markdown-embed') &&
-            !(el.tagName === 'P' && el.closest('pre')) && !(el.tagName === 'LI' && el.querySelector(':scope > p')));
-          const nodes = candidates.map(node => {
-            const position = [];
-            for (let el = node; el && el !== root; el = el.parentElement)
-              position.push({el, parent: el.parentElement, before: el.previousSibling, after: el.nextSibling});
-            return {node, root, position, text: node.textContent, measured: null,
-              domPath: this.hooks.elementPath(node, root)};
-          });
-          entries.push({type, owner, nodes});
-        }
-        snapshots.push({entries});this.renderedSections.set(target.index, snapshots);
-      }
-      for (const snapshot of snapshots) for (const entry of snapshot.entries) for (const record of entry.nodes) {
-        if (!this.sameGapPosition(record, root)) continue;
-        const block = result.blocks.find(block => block.renderNode === record.node);
-        if (block) record.measured = block;
-      }
     }
     for (const block of result.blocks) if (block.key) this.measured.add(block.key);
     for (const skipped of result.skipped) if (skipped.key) this.failed.add(skipped.key);
@@ -569,8 +461,7 @@ class TargetTracker {
         el.previousSibling === before && el.nextSibling === after);
   }
   gapsFor(target, gaps = [...this.mappingGaps.values()]) {
-    return gaps.filter(gap => gap.sectionRelation === 'inside' ||
-      (gap.sectionRelation !== 'outside' && (!gap.possibleRange || target.ranges.some(r => intersects(r, gap.possibleRange)))));
+    return gaps.filter(gap => !gap.possibleRange || target.ranges.some(r => intersects(r, gap.possibleRange)));
   }
   reasons(target, groups = this.groups, requireMeasured = true, gaps = [...this.mappingGaps.values()]) {
     const reasons = [];
@@ -606,61 +497,6 @@ class TargetTracker {
     if (relevantGaps.some(gap => gap.kind === 'text')) reasons.push('目标内或无法排除属于目标的文本缺少可信源码映射');
     return [...new Set(reasons)];
   }
-  renderedSectionResult(target, gaps) {
-    const snapshot = this.renderedSections.get(target.index)?.[0];
-    const reasons = [], blocks = [];
-    if (!snapshot) return {reasons: ['章节 DOM 内容检测证据缺失'], blocks, mappingPrecision: 'partial'};
-    const expected = target.expected;
-    const entries = snapshot.entries;
-    const relevantGaps = this.gapsFor(target, gaps);
-    const gapNodes = relevantGaps.map(gap => gap.node).filter(Boolean);
-    const belongsToGap = node => !!node && gapNodes.some(gapNode => gapNode === node || gapNode.contains?.(node) || node.contains?.(gapNode));
-    const hasMappingGaps = relevantGaps.length > 0;
-    if (relevantGaps.some(gap => gap.kind === 'unsupported')) reasons.push('章节含未支持或无法检测的渲染内容');
-    if (!hasMappingGaps && (entries.length !== expected.length || entries.some((entry, i) => entry.type !== expected[i]?.type)))
-      reasons.push('章节预期区块缺失或渲染结构／顺序异常');
-    let partial = hasMappingGaps;
-    for (const [index, entry] of entries.entries()) {
-      const block = expected[index];
-      if ((entry.type === 'unknown' && !belongsToGap(entry.owner)) ||
-          (entry.type !== 'unknown' && !SUPPORTED.has(entry.type) && entry.type !== 'thematicBreak'))
-        reasons.push('章节含未支持或无法检测的渲染内容');
-      if (entry.type === 'heading' || (entry.type === 'thematicBreak' && block?.textCoverage === 'excluded')) continue;
-      if (!entry.nodes.length) reasons.push('章节内部节点完全无法检测');
-      for (const record of entry.nodes) {
-        if (!record.measured) {
-          if (!belongsToGap(record.node)) reasons.push('章节内部节点未成功检测');
-          continue;
-        }
-        const measured = record.measured;
-        if (!measured.lineCount || measured.measurementUnit?.complete === false) reasons.push('章节内部存在隐藏、未测或异常渲染文本');
-        const exact = block && measured.sourceStartLine === block.startLine && measured.sourceEndLine === block.endLine;
-        partial ||= !exact;
-        blocks.push({...measured, sectionDomPath: record.domPath, mappingPrecision: exact ? 'exact' : 'partial'});
-      }
-      const walker = entry.owner.ownerDocument.createTreeWalker(entry.owner, 4);
-      let textNode;
-      while ((textNode = walker.nextNode())) {
-        if (!textNode.nodeValue.trim() || textNode.parentElement.closest('button,script,style,.copy-code-button,.sr-only,.callout-title,.callout-icon,.callout-fold')) continue;
-        if (!entry.nodes.some(record => record.node.contains(textNode) && record.measured) && !belongsToGap(textNode.parentElement))
-          reasons.push('章节内部有未参与检测的文本节点');
-      }
-      for (const group of this.groups.values()) {
-        if (![...group.owners].some(owner => owner === entry.owner || entry.owner.contains(owner))) continue;
-        if (group.unsupported.some(node => node === entry.owner || entry.owner.contains(node)) ||
-            (group.calloutIssues.length && [...group.callouts].some(node => entry.owner.contains(node))))
-          reasons.push('章节含未支持内容或明确渲染异常');
-      }
-      if (entry.type === 'callout' && ![...this.groups.values()].some(group => group.callouts.size === 1 &&
-          [...group.owners].some(owner => owner === entry.owner || entry.owner.contains(owner))))
-        reasons.push('Callout 内容检测完整性无法确认');
-    }
-    // A trusted section boundary plus successful rendered measurements is
-    // sufficient for coverage. Keep source mapping gaps as precision data.
-    if (hasMappingGaps) partial = true;
-    if (!blocks.length) reasons.push('目标没有可测文本');
-    return {reasons: [...new Set(reasons)], blocks, mappingPrecision: partial ? 'partial' : 'exact'};
-  }
   async localize(view) {
     if (this.targets.length !== 1 || !this.targets[0].resolved) return false;
     const root = view.containerEl.querySelector('.markdown-preview-view');
@@ -684,190 +520,11 @@ class TargetTracker {
     nodes = elements();
     return nodes.length > 0 && nodes.every(el => fullyVisible(el, root));
   }
-  sectionPlan(target, root) {
-    const plan = {sourceRange: target.ranges.length === 1 ? {...target.ranges[0]} : null,
-      expectedBlocks: target.expected.map(block => ({...block})), startOwner: null, endOwner: null,
-      startHeading: null, endHeading: null, orderPassed: null,
-      sectionDomRange: null, boundaryEvidence: null, contentNodesUnchecked: [], status: 'unavailable', reason: null};
-    const fail = reason => {plan.reason = reason;return plan;};
-    if (target.requested.kind !== 'section' || !target.requested.headingPath) return fail('仅支持 headingPath 章节目标');
-    if (!target.resolved || !plan.sourceRange) return fail(target.resolutionReason || '章节未唯一解析');
-    if (!root || root !== this.root || !root.isConnected) return fail('当前阅读视图不存在或已失效');
-    const cache = this.plugin.app.metadataCache.getFileCache(this.plugin.app.vault.getAbstractFileByPath?.(this.file) || {path: this.file}) || {};
-    const range = plan.sourceRange;
-    const sourceHeadings = cache.headings || [];
-    const starts = sourceHeadings.filter(h => h.position.start.line + 1 === range.startLine);
-    const ends = sourceHeadings.filter(h => h.position.start.line === range.endLine);
-    if (starts.length !== 1) return fail('开始标题 metadata 不唯一');
-    if (!ends.length) return fail('结束边界不存在；暂不支持 document-end');
-    if (ends.length !== 1 || ends[0].level > starts[0].level) return fail('结束标题不是唯一同级或更高层级边界');
-    const sections = cache.sections || [];
-    const sectionAt = h => sections.filter(s => s.type === 'heading' && s.position.start.line === h.position.start.line);
-    if (sectionAt(starts[0]).length !== 1 || sectionAt(ends[0]).length !== 1) return fail('开始或结束标题缺少唯一源区块');
-
-    // A rendered heading may have no MarkdownPostProcessorContext. Bind it to
-    // metadata only when text and level are unique in both source and DOM.
-    const domHeadings = [...root.querySelectorAll('h1,h2,h3,h4,h5,h6')].filter(el =>
-      !el.closest('.frontmatter,.metadata-container,.markdown-embed') && root.contains(el));
-    const ownerOf = el => {
-      const parent = el.parentElement;
-      return parent && parent !== root && parent.querySelectorAll('h1,h2,h3,h4,h5,h6').length === 1 &&
-        parent.textContent.trim() === el.textContent.trim() ? parent : el;
-    };
-    const identify = heading => {
-      const text = heading.heading, tagName = `H${heading.level}`;
-      const sourceMatches = sourceHeadings.filter(h => h.heading === text && h.level === heading.level);
-      const textMatches = domHeadings.filter(el => el.textContent.trim() === text);
-      const levelMatches = domHeadings.filter(el => el.tagName === tagName);
-      const exact = textMatches.filter(el => el.tagName === tagName);
-      const evidence = {domFound: textMatches.length > 0, textMatches: textMatches.length > 0,
-        levelMatches: exact.length > 0, sourceUnique: sourceMatches.length === 1,
-        sameLevelCandidates: levelMatches.length, domMatches: exact.length, sourceRange: {startLine: heading.position.start.line + 1,
-          endLine: heading.position.start.line + 1}, reason: null};
-      if (sourceMatches.length !== 1) evidence.reason = '源码存在重复的同级同名标题';
-      else if (!textMatches.length) evidence.reason = 'DOM 标题文本不匹配或标题未渲染';
-      else if (!exact.length) evidence.reason = 'DOM 标题层级不匹配';
-      else if (exact.length !== 1) evidence.reason = 'DOM 存在重复的同级同名标题';
-      return {evidence, node: evidence.reason ? null : exact[0], owner: evidence.reason ? null : ownerOf(exact[0])};
-    };
-    const startMatch = identify(starts[0]), endMatch = identify(ends[0]);
-    plan.startHeading = startMatch.evidence;plan.endHeading = endMatch.evidence;
-    plan.startOwner = startMatch.owner;plan.endOwner = endMatch.owner;
-    if (startMatch.evidence.reason || endMatch.evidence.reason)
-      return fail(`开始标题：${startMatch.evidence.reason || '匹配'}；结束标题：${endMatch.evidence.reason || '匹配'}`);
-    const start = plan.startOwner, end = plan.endOwner;
-    if (!root.contains(start) || !root.contains(end) || !start.isConnected || !end.isConnected)
-      return fail('标题 owner 不属于当前阅读视图');
-    if (start === end || start.contains(end) || end.contains(start) || !(start.compareDocumentPosition(end) & 4)) {
-      plan.orderPassed = false;return fail('DOM 顺序与源码标题顺序不一致');
-    }
-    const chapterHeadings = sourceHeadings.filter(h => h.position.start.line >= starts[0].position.start.line &&
-      h.position.start.line <= ends[0].position.start.line);
-    const headingOwners = new Map(), matchedNodes = [];
-    let previousDomIndex = -1;
-    for (const heading of chapterHeadings) {
-      if (sectionAt(heading).length !== 1) {plan.orderPassed = false;return fail('章节内标题缺少唯一源区块');}
-      const match = identify(heading), index = domHeadings.indexOf(match.node);
-      if (match.evidence.reason) {plan.orderPassed = false;return fail(`章节内标题：${match.evidence.reason}`);}
-      if (index <= previousDomIndex || headingOwners.has(match.owner)) {
-        plan.orderPassed = false;return fail('DOM 顺序与源码标题顺序不一致');
-      }
-      previousDomIndex = index;matchedNodes.push(match.node);
-      headingOwners.set(match.owner, match.evidence.sourceRange);
-    }
-    const firstIndex = domHeadings.indexOf(startMatch.node), lastIndex = domHeadings.indexOf(endMatch.node);
-    if (firstIndex < 0 || lastIndex < firstIndex ||
-        domHeadings.slice(firstIndex, lastIndex + 1).some(el => !matchedNodes.includes(el))) {
-      plan.orderPassed = false;return fail('章节边界内存在无法与源码顺序核对的 DOM 标题');
-    }
-    plan.orderPassed = true;
-    if (start.parentElement !== end.parentElement) return fail('边界 owner 不在同一父容器，无法证明连续章节范围');
-
-    // Title boundaries prove membership; content coverage remains independent.
-    // Existing source evidence is used only to reject positive contradictions,
-    // never as a prerequisite for an interior Markdown node.
-    const members = [];
-    let previousEnd = range.startLine - 1;
-    for (let node = start; node && node !== end; node = node.nextSibling) {
-      if (node.nodeType === 3 && !node.textContent.trim()) continue;
-      if (node.nodeType !== 1 && node.nodeType !== 3 && node.nodeType !== 8)
-        return fail('章节区间含无法确认边界的节点');
-      members.push(node);
-      if (node.nodeType !== 1) {
-        plan.contentNodesUnchecked.push({nodeType: node.nodeType, domPath: this.hooks.elementPath(node.parentElement, root),
-          reason: '仅验证标题边界；内容覆盖未检查'});
-        continue;
-      }
-      const headingRange = headingOwners.get(node);
-      const mapped = headingRange ? null : trustedSection(node, this.plugin, this.source, this.file, this.hooks);
-      const bounds = headingRange || (mapped && {startLine: mapped.start + 1, endLine: mapped.end + 1});
-      if (bounds) {
-        if (!contains(range, bounds)) return fail('章节区间含明显跨章节源码容器');
-        if (bounds.startLine <= previousEnd) return fail('DOM 顺序与源码顺序不一致');
-        previousEnd = bounds.endLine;
-      }
-      for (const descendant of node.querySelectorAll('*')) {
-        const evidence = trustedSection(descendant, this.plugin, this.source, this.file, this.hooks);
-        if (evidence && !contains(range, {startLine: evidence.start + 1, endLine: evidence.end + 1}))
-          return fail('章节区间含明显跨章节源码容器');
-      }
-      if (!headingRange) plan.contentNodesUnchecked.push({tagName: node.tagName,
-        className: node.getAttribute('class') || '', domPath: this.hooks.elementPath(node, root),
-        reason: '仅验证标题边界；unknown、unsupported、映射及 expected blocks 留给 coverage'});
-    }
-    plan.sectionDomRange = {parentDomPath: this.hooks.elementPath(start.parentElement, root),
-      startOwnerDomPath: this.hooks.elementPath(start, root), endOwnerDomPath: this.hooks.elementPath(end, root),
-      startInclusive: true, endExclusive: true, memberCount: members.length};
-    plan.boundaryEvidence = {basis: 'unique-heading-text-level-dom-order',
-      startUnique: true, endUnique: true, textMatched: true, levelMatched: true,
-      orderPassed: true, sameParent: true, continuousSiblingRange: true,
-      noInterveningChapterHeading: true, contentCoverageChecked: false};
-    plan.status = 'ready';return plan;
-  }
-  liveSectionPlanDiagnostic(target) {
-    let plan;
-    try { plan = this.sectionPlan(target, this.root); }
-    catch { plan = {sourceRange: target.ranges.length === 1 ? {...target.ranges[0]} : null,
-      expectedBlocks: target.expected.map(block => ({...block})), startOwner: null, endOwner: null,
-      startHeading: null, endHeading: null, orderPassed: null,
-      status: 'unavailable', reason: '边界验证异常；未建立可信 sectionPlan'}; }
-    const describe = (owner, heading) => {
-      if (!owner) return null;
-      return {tagName: owner.tagName, className: owner.getAttribute('class') || '',
-        domPath: this.hooks.elementPath(owner, this.root), sourceRange: heading?.sourceRange || null,
-        mapping: 'metadata-heading-text-level-order'};
-    };
-    // Serialize boundary evidence without DOM references; do not alter scanning.
-    try {return {...plan, startOwner: describe(plan.startOwner, plan.startHeading),
-      endOwner: describe(plan.endOwner, plan.endHeading)};}
-    catch {return {...plan, startOwner: null, endOwner: null, status: 'unavailable', reason: 'owner 诊断序列化失败'};}
-  }
-  sectionPlanDiagnostic(target) {
-    const after = this.liveSectionPlanDiagnostic(target);
-    const snapshots = this.sectionSnapshots.get(target.index) || [];
-    // Prefer a complete proof made while the boundary owners were connected.
-    // A missing final DOM is not grounds to discard that historical proof.
-    const cached = snapshots.find(plan => plan.status === 'ready') ||
-      snapshots.find(plan => plan.startHeading?.domFound && plan.endHeading?.domFound) ||
-      snapshots.find(plan => plan.startHeading?.domFound || plan.endHeading?.domFound) || snapshots[0];
-    const plan = cached || after;
-    const heading = (name) => {
-      const base = plan[name];
-      if (!base) return base;
-      return {...base,
-        headingDuringScanFound: snapshots.some(item => item[name]?.domFound),
-        headingAfterScanFound: !!after[name]?.domFound};
-    };
-    // Any observed duplicate/text/level/order contradiction invalidates even
-    // an earlier ready snapshot. Repeated screens are not duplicate headings.
-    const contradiction = [...snapshots, after].find(item =>
-      [item.startHeading, item.endHeading].some(h => h &&
-        (!h.sourceUnique || h.domMatches > 1 || (h.domFound && !h.levelMatches))) ||
-      item.orderPassed === false || /重复|层级不匹配|跨章节|父容器|无法确认边界/.test(item.reason || ''));
-    return {...plan, startHeading: heading('startHeading'), endHeading: heading('endHeading'),
-      evidenceSource: cached ? 'during-scan' : 'after-scan',
-      headingSnapshots: this.headingSnapshots,
-      ...(this.headingEvidenceFailed ? {status: 'unavailable', reason: '扫描标题证据记录失败'} : {}),
-      ...(contradiction ? {status: 'unavailable', reason: contradiction.reason, orderPassed: contradiction.orderPassed} : {})};
-  }
   filter(report, method) {
     const allBlocks = report.blocks;
     const targets = this.targets.map(target => {
-      const sectionPlan = target.requested.kind === 'section' ? this.sectionPlanDiagnostic(target) : null;
-      const ignoredOutsideSectionGaps = [], checkedInsideSectionGaps = [], coverageGaps = [];
-      for (const [key, gap] of this.mappingGaps) {
-        const membership = sectionPlan?.status === 'ready' ? key.sectionMembership?.get(target.index) : null;
-        if (membership?.has('inside')) {
-          const checked = {...gap, sectionRelation: 'inside'};
-          Object.defineProperty(checked, 'gapIdentity', {value: key});
-          Object.defineProperty(checked, 'node', {value: key.node});
-          checkedInsideSectionGaps.push(checked);coverageGaps.push(checked);
-        } else if (membership?.has('outside')) {
-          ignoredOutsideSectionGaps.push({...gap, sectionRelation: 'outside'});
-        } else coverageGaps.push(gap);
-      }
-      const rendered = sectionPlan?.status === 'ready' ? this.renderedSectionResult(target, coverageGaps) : null;
-      const reasons = rendered ? rendered.reasons : this.reasons(target, this.groups, true, coverageGaps);
+      const coverageGaps = this.gapsFor(target);
+      const reasons = this.reasons(target, this.groups, true, coverageGaps);
       if (method === 'visible') {
         const root = this.root;
         for (const section of target.expected) {
@@ -876,22 +533,18 @@ class TargetTracker {
           if (!root || !group || [...group.nodes.values(), ...group.headings].some(el => !fullyVisible(el, root))) reasons.push('局部扫描时目标不再完整可见');
         }
       }
-      const selected = rendered ? rendered.blocks : allBlocks.filter(block => block.sourceStartLine != null && target.ranges.some(r => intersects(r, {startLine: block.sourceStartLine, endLine: block.sourceEndLine})));
+      const selected = allBlocks.filter(block => block.sourceStartLine != null &&
+        target.ranges.some(r => intersects(r, {startLine: block.sourceStartLine, endLine: block.sourceEndLine})));
       return {...target, coverage: reasons.length ? 'uncovered' : 'complete', reasons: [...new Set(reasons)],
-        mappingGaps: this.gapsFor(target, coverageGaps),
-        ...(sectionPlan ? {sectionPlan, ignoredOutsideSectionGaps, checkedInsideSectionGaps,
-          mappingPrecision: rendered?.mappingPrecision || (this.gapsFor(target, coverageGaps).length ? 'partial' : 'exact')} : {}),
-        renderedBlocks: rendered?.blocks,
-        measuredBlocks: selected.length, suspected: selected.filter(b => b.suspected).length};
+        mappingGaps: coverageGaps, measuredBlocks: selected.length, suspected: selected.filter(b => b.suspected).length};
     });
     const ranges = this.targets.flatMap(target => target.ranges);
-    const blocks = targets.some(target => target.renderedBlocks) ? targets.flatMap(target => target.renderedBlocks ||
-      allBlocks.filter(block => block.sourceStartLine != null && target.ranges.some(range => intersects(range,
-        {startLine: block.sourceStartLine, endLine: block.sourceEndLine})))) : allBlocks.filter(block => block.sourceStartLine != null && ranges.some(r => intersects(r, {startLine: block.sourceStartLine, endLine: block.sourceEndLine})));
-    for (const target of targets) delete target.renderedBlocks;
-    const skipped = report.skipped.filter(block => block.sourceStartLine == null || ranges.some(r => intersects(r, {startLine: block.sourceStartLine, endLine: block.sourceEndLine})));
+    const blocks = allBlocks.filter(block => block.sourceStartLine != null &&
+      ranges.some(r => intersects(r, {startLine: block.sourceStartLine, endLine: block.sourceEndLine})));
+    const skipped = report.skipped.filter(block => block.sourceStartLine == null ||
+      ranges.some(r => intersects(r, {startLine: block.sourceStartLine, endLine: block.sourceEndLine})));
     const complete = targets.every(target => target.coverage === 'complete');
-    return {...report, schemaVersion: 3, scope: '指定修改目标；按完整源区块筛选，非全文验收', blocks, skipped,
+    return {...report, schemaVersion: 3, scope: '指定源码行或段落；按完整源区块筛选，非全文验收', blocks, skipped,
       documentCoverage: report.scan.full ? (report.scan.complete ? 'complete' : 'incomplete') : 'not-scanned',
       targeting: {completionScope: 'targets', scanMethod: method, filterGranularity: 'source-block', coverageBasis: 'target-source-blocks-v1',
         originalBlockCount: allBlocks.length, coverage: complete ? 'complete' : 'uncovered',
