@@ -54,6 +54,8 @@ python3 -B "<vault>/.obsidian/plugins/short-tail-inspector/scan-note.py" "目录
 
 行范围必须有效且与源码一致。插件把测量结果关联到源码区块、源行和 DOM 路径；不完整映射、未支持内容、隐藏或裁切内容、测量失败及不完整扫描不会被报告为通过。全文 `documentCoverage` 与目标 `targetCoverage` 分别表达全文扫描和目标范围的覆盖情况。
 
+源码定位优先校验实时 Obsidian 区块信息；失效候选继续查找可信祖先，缓存回退须校验注册时的源码版本和 owner 状态，不按文本猜测行号。报告中的 `sourceMapping` 记录定位状态、依据及候选失败原因；`renderDomPath` 独立记录相对阅读容器的 DOM 路径。原 `domPath` 仍相对源码 owner，映射失败时保持为空。这些诊断不代表目标覆盖已经通过；真实 Obsidian 的定位验证仍须单独完成。
+
 短尾比例 25% 是筛查阈值，不是排版规范。列表、代码、Callout、主题和 Obsidian DOM 的组合仍需根据具体报告判断。合成浏览器与 API 替身测试不能代替真实 Obsidian 验证。
 
 ## 开发与验证
@@ -65,6 +67,7 @@ python3 -B "<vault>/.obsidian/plugins/short-tail-inspector/scan-note.py" "目录
 ```bash
 node tests/regression.cjs
 node tests/codeblock-skip.cjs
+node tests/source-mapping.cjs
 node tests/target-scan.cjs
 node tests/callout-coverage.cjs
 node tests/manual-layout.cjs

@@ -3,11 +3,17 @@ const VERSION='0.2.3', THRESHOLD=0.25;
 const round=n=>Math.round(n*10)/10;
 const SELECTOR='h1,h2,h3,h4,h5,h6,p,pre,li';
 class LayoutContexts {
-  constructor(){this.nodes=new WeakMap();this.refs=new Set();}
-  set(el,value){if(!this.nodes.has(el))this.refs.add(new WeakRef(el));this.nodes.set(el,value);}
+  constructor(){this.nodes=new WeakMap();this.refs=new Set();this.snapshots=new WeakMap();}
+  set(el,value){
+    if(!this.nodes.has(el))this.refs.add(new WeakRef(el));this.nodes.set(el,value);
+    this.snapshots.set(el,{record:value,ctx:value.ctx,sourcePath:value.ctx?.sourcePath,
+      info:value.info?{text:value.info.text,lineStart:value.info.lineStart,lineEnd:value.info.lineEnd}:null,
+      root:el.closest('.markdown-preview-view'),parent:el.parentElement,before:el.previousSibling,after:el.nextSibling,text:el.textContent});
+  }
   get(el){return this.nodes.get(el);}
+  snapshotFor(el){return this.snapshots.get(el);}
   *[Symbol.iterator](){for(const ref of this.refs){const el=ref.deref();if(el)yield [el,this.nodes.get(el)];else this.refs.delete(ref);}}
-  clear(){this.nodes=new WeakMap();this.refs.clear();}
+  clear(){this.nodes=new WeakMap();this.snapshots=new WeakMap();this.refs.clear();}
 }
 function visible(el, viewport) {
   const r=el.getBoundingClientRect(), s=el.ownerDocument.defaultView.getComputedStyle(el);
@@ -65,12 +71,45 @@ function nearestHeading(source,start,fallback) {
   }
   return heading || fallback;
 }
-function sectionFor(el, contexts, sourceText) {
+function sourceMappingFor(el, contexts, sourceText, options={}) {
+  const root=options.root||el.closest('.markdown-preview-view'), failures=[];
+  const lineCount=options.lineCount??sourceText.split('\n').length;
+  const reject=(owner,reason)=>failures.push({reason,ownerTag:owner.tagName,ownerDomPath:root&&root.contains(owner)?elementPath(owner,root):null});
+  const validate=info=>!info?'section-info-missing':info.text!==sourceText?'source-version-mismatch':
+    !Number.isInteger(info.lineStart)||!Number.isInteger(info.lineEnd)||info.lineStart<0||info.lineEnd<info.lineStart||info.lineEnd>=lineCount?'invalid-source-range':null;
+  if(!el.isConnected||root&&!root.contains(el))return {section:null,status:'unmapped',reason:'detached-node',failures};
   for(let p=el;p;p=p.parentElement) {
     const record=contexts.get(p); const ctx=record?.ctx;
-    if(ctx) {if(typeof record.info?.text==='string' && record.info.text!==sourceText)return null;const info=ctx.getSectionInfo(el)||record.info;if(info)return {sourcePath:ctx.sourcePath,start:info.lineStart,end:info.lineEnd,owner:p};}
+    if(ctx) {
+      if(root&&(p===root||!root.contains(p))){reject(p,'owner-outside-reading-content');break;}
+      if(typeof ctx.sourcePath!=='string'||!ctx.sourcePath||options.filePath&&ctx.sourcePath!==options.filePath){reject(p,'source-path-mismatch');continue;}
+      let info;
+      try{info=ctx.getSectionInfo(el);}catch{reject(p,'section-api-error');continue;}
+      let basis='live';
+      if(!info) {
+        const snapshot=contexts.snapshotFor?.(p);
+        const stable=snapshot&&snapshot.record===record&&snapshot.ctx===ctx&&snapshot.sourcePath===ctx.sourcePath&&
+          snapshot.root===root&&snapshot.parent===p.parentElement&&snapshot.before===p.previousSibling&&
+          snapshot.after===p.nextSibling&&snapshot.text===p.textContent;
+        if(!stable){reject(p,'cached-owner-unverified');continue;}
+        if(validate(record.info)||validate(snapshot.info)||record.info.lineStart!==snapshot.info.lineStart||record.info.lineEnd!==snapshot.info.lineEnd){reject(p,'cached-section-invalid');continue;}
+        info=snapshot.info;basis='registered-snapshot';
+      }
+      const reason=validate(info);
+      if(reason){reject(p,reason);continue;}
+      if(basis==='live'&&p!==el) {
+        let ownerInfo;
+        try{ownerInfo=ctx.getSectionInfo(p);}catch{reject(p,'owner-api-error');continue;}
+        if(validate(ownerInfo)||ownerInfo.lineStart!==info.lineStart||ownerInfo.lineEnd!==info.lineEnd){reject(p,'owner-range-mismatch');continue;}
+      }
+      return {section:{sourcePath:ctx.sourcePath,start:info.lineStart,end:info.lineEnd,owner:p},status:'mapped',basis,failures};
+    }
+    if(p===root)break;
   }
-  return null;
+  return {section:null,status:'unmapped',reason:failures.length?'no-trusted-candidate':'context-missing',failures};
+}
+function sectionFor(el, contexts, sourceText, options={}) {
+  return sourceMappingFor(el,contexts,sourceText,options).section;
 }
 function elementPath(el,owner) {
   const path=[];
@@ -137,22 +176,30 @@ function collect(root,contexts,source,path) {
     const ctx=record.ctx;
     if(!owner.isConnected)continue;
     if(!root.contains(owner) || !visible(owner,viewport) || ctx.sourcePath!==path)continue;
-    if(typeof record.info?.text==='string' && record.info.text!==sourceText)continue;
-    const info=ctx.getSectionInfo(owner)||record.info;if(info)ranges.push([info.lineStart,info.lineEnd]);
+    const sec=sectionFor(owner,contexts,sourceText,{root,filePath:path,lineCount:source.length});
+    if(sec)ranges.push([sec.start,sec.end]);
   }
-  for(const el of root.querySelectorAll('table'))if(visible(el,viewport))skipped.push({key:'table:'+el.textContent,reason:'表格未支持逐单元格短尾检测'});
+  const locate=el=>{
+    const mapping=sourceMappingFor(el,contexts,sourceText,{root,filePath:path,lineCount:source.length}),sec=mapping.section;
+    const domPath=sec?elementPath(el,sec.owner):null;
+    const {section,...sourceMapping}=mapping;
+    return {sec,key:sec?`${sec.start}:${sec.end}:${domPath}`:null,
+      location:{sourceStartLine:sec?sec.start+1:null,sourceEndLine:sec?sec.end+1:null,domPath,
+        renderDomPath:elementPath(el,root),sourceMapping}};
+  };
+  for(const el of root.querySelectorAll('table'))if(visible(el,viewport)) {
+    const {sec,key,location}=locate(el);if(sec)ranges.push([sec.start,sec.end]);
+    skipped.push({key:key||'table:'+el.textContent,kind:'表格',...location,reason:'表格未支持逐单元格短尾检测'});
+  }
   for(const el of root.querySelectorAll(SELECTOR)) {
     if(/^H[1-6]$/.test(el.tagName))fallbackHeading=el.textContent.trim();
     if(!visible(el,viewport) || el.closest('table,.frontmatter,.metadata-container,.markdown-embed'))continue;
-    const sec=sectionFor(el,contexts,sourceText);
-    if(sec && sec.sourcePath!==path)continue;
+    const {sec,key,location}=locate(el);
     if(sec)ranges.push([sec.start,sec.end]);
     if(/^H[1-6]$/.test(el.tagName))continue;
     if(el.tagName!=='PRE' && el.closest('pre'))continue;
     if(el.tagName==='LI' && el.querySelector(':scope > p'))continue;
     const heading=nearestHeading(source,sec?.start??null,fallbackHeading);
-    const location=sec?{sourceStartLine:sec.start+1,sourceEndLine:sec.end+1,domPath:elementPath(el,sec.owner)}:{sourceStartLine:null,sourceEndLine:null,domPath:null};
-    const key=sec?`${sec.start}:${sec.end}:${location.domPath}`:null;
     if(el.tagName==='PRE') {
       skipped.push({key:key||`code:${elementPath(el,root)}`,heading,kind:'代码块',...location,reason:'代码块内容受保护，跳过短尾检测'});
       continue;

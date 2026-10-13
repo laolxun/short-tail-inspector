@@ -8,7 +8,9 @@ async function fixture(options = {}) {
   const commands = new Map(), inspected = [], saved = [], modals = [], notices = [], events=[];
   let f,layoutCalls=0,saveCalls=0;
   function element() {
-    return {children: [], listeners: {}, createEl(tag, options) {
+    return {children: [], listeners: {}, style:{setProperty(){}}, querySelectorAll(selector) {
+      const tags=selector.split(',');return this.children.flatMap(child=>[...(tags.includes(child.tag)?[child]:[]),...child.querySelectorAll(selector)]);
+    }, createEl(tag, options) {
       const child = {...element(), tag, options};this.children.push(child);return child;
     }, addEventListener(event, callback) {this.listeners[event] = callback;}};
   }

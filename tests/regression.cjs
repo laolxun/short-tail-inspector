@@ -32,7 +32,7 @@ const scanChecks=await page.evaluate(async()=>{
   if(!first.scan.complete || first.blocks.length!==20 || root.scrollTop!==17)throw Error('full scan coverage, duplicates or restoration failed');
   const second=await window.inspectPrototype(view,plugin,true);
   if(second.blocks.length!==20)throw Error('repeated scan count changed');
-  const firstOwner=root.querySelector('p').parentElement;const saved=contexts.get(firstOwner);contexts.set(firstOwner,{...saved,info:{...saved.info,text:'old version'}});
+  const firstOwner=root.querySelector('p').parentElement;const saved=contexts.get(firstOwner),staleInfo={...saved.info,text:'old version'};contexts.set(firstOwner,{ctx:{...saved.ctx,getSectionInfo:()=>staleInfo},info:staleInfo});
   const stale=await window.inspectPrototype(view,plugin,true);if(stale.scan.complete || !stale.scan.missingSourceLocations)throw Error('stale rendered version accepted');contexts.set(firstOwner,saved);
   view.previewMode.applyScroll=n=>{root.scrollTop=n;window.setTimeout(()=>{plugin.cancelled=true},70)};
   let cancelled=false;try{await window.inspectPrototype(view,plugin,true)}catch(e){cancelled=e.message.includes('取消')}

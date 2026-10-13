@@ -64,7 +64,8 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
       assert(r.targeting.scanMethod === 'full' && r.targeting.coverage === 'complete' && r.blocks.length === 1, 'oversized paragraph must use existing full scanner and filter');checks.push('oversizedTargetFullFallback');
 
       f = fixture();const old = f.contexts.get(f.rows[2].owner);
-      f.contexts.set(f.rows[2].owner, {...old, info: {...old.info, text: 'stale'}});
+      const staleInfo={...old.info,text:'stale'};
+      f.contexts.set(f.rows[2].owner, {ctx:{...old.ctx,getSectionInfo:()=>staleInfo},info:staleInfo});
       r = await run(f, [target(f.rows[2])]);
       assert(r.targeting.scanMethod === 'full' && r.targeting.result === 'uncovered' && r.blocks.length === 0, 'stale mapping must not produce clear');checks.push('staleMappingUncovered');
 
@@ -139,8 +140,8 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
       const inspect = f.hooks.inspect;
       f.hooks.inspect = (...args) => {makeSecondStale(f);return inspect(...args);};
       r = await run(f, [{kind: 'lines', startLine: f.rows[0].startLine, endLine: f.rows[1].endLine}]);
-      assert(!f.calls[0].full && r.scan.missingSourceLocations && r.targeting.result === 'uncovered', 'mapping lost after localization cannot produce local clear');
-      checks.push('mappingLostDuringLocalScanUncovered');
+      assert(!f.calls[0].full && !r.scan.missingSourceLocations && r.targeting.result === 'uncovered', 'live parent recovers position while the existing target guard still rejects stale child evidence');
+      checks.push('staleChildPositionRecoveredButTargetStillUncovered');
 
       f = mixedMapping();const inspectWithoutVersion = f.hooks.inspect;
       f.hooks.inspect = (...args) => {
@@ -167,7 +168,7 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
         f.rangeTarget = {kind: 'lines', startLine: boundary + 1, endLine: lines.length};
         return f;
       }
-      const stale = (f, owner) => {const rec = f.contexts.get(owner);f.contexts.set(owner, {...rec, info: {...rec.info, text: 'stale'}});};
+      const stale = (f, owner) => {const rec = f.contexts.get(owner),info={...rec.info,text:'stale'};f.contexts.set(owner,{ctx:{...rec.ctx,getSectionInfo:()=>info},info});};
       f = rangeFixture();const sibling = document.createElement('p');sibling.textContent = '未映射兄弟节点';f.rows[3].owner.after(sibling);
       r = await run(f, [f.rangeTarget]);
       assert(r.targeting.coverage === 'uncovered' && r.targeting.targets[0].mappingGaps.length > 0, 'unmapped node between target owners must block target');checks.push('unmappedTargetSiblingStillFails');
