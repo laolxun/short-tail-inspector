@@ -76,6 +76,8 @@ node tests/report-store.cjs
 python3 -B tests/scan-note-test.py
 python3 -B tests/target-workflow-test.py
 node --test tests/target-ranges.cjs
+node tests/paragraph-units.cjs
+python3 -B tests/paragraph-workflow-test.py
 ```
 
 浏览器测试需要可解析的 Playwright 与 Chromium；可通过 `PLAYWRIGHT_MODULE` 和 `CHROME_EXECUTABLE` 指定已有依赖。测试替身不证明真实 Obsidian 布局、刷新、文件同步或侧栏恢复。
