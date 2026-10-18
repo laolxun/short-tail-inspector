@@ -9,16 +9,19 @@ function fixture(options = {}) {
   const source = '合成段落', sha = crypto.createHash('sha256').update(source).digest('hex');
   const request = {schemaVersion: options.version || 1, action: 'scan', id: 'test-request', file: 'fixture.md',
     expiresAt: Date.now() + 30000, expectedSourceSha256: sha, expectedLayout: {contentWidthPx: 700, fontSizePx: 16}, temporaryReadingLayout: true};
-  if (request.schemaVersion === 2) request.targets = [{kind: 'lines', startLine: 1, endLine: 1}];
+  if (request.schemaVersion === 3) {request.scanMode=options.scanMode||'visible';delete request.expectedLayout;if(request.scanMode==='targets')request.localOnly=true;}
+  if (request.schemaVersion === 2 || request.scanMode==='targets') request.targets = [{kind: 'lines', startLine: 1, endLine: 1}];
   if (options.targets) request.targets = options.targets;
-  const calls = {inspect: [], targeted: 0, saves: 0, modes: [], ephemeral: 0, expanded: []};
-  const root = {scrollTop: 55, clientWidth: 720, querySelector: () => ({getBoundingClientRect: () => ({width: 700})}),
-    fontSize: '16px', ownerDocument: {fonts: {ready: Promise.resolve()}, defaultView: {getComputedStyle: () => ({fontSize: root.fontSize})}}};
+  Object.assign(request,options.requestFields||{});
+  const calls = {visible:0, inspect: [], targeted: 0, saves: 0, modes: [], ephemeral: 0, expanded: []};
+  const root = {scrollTop: 55, clientWidth: 720, querySelector: () => ({getBoundingClientRect: () => ({width: options.width || 700})}),
+    fontSize: options.fontSize || '16px', ownerDocument: {fonts: {ready: Promise.resolve()}, defaultView: {getComputedStyle: () => ({fontSize: root.fontSize})}}};
   class MarkdownView {
     constructor() {this.file = {path: 'fixture.md', stat: {mtime: 1}};this.mode = options.mode || 'preview';this.containerEl = {getBoundingClientRect: () => ({width: 720}), querySelector: () => root};
       this.previewMode = {getScroll: () => root.scrollTop, applyScroll: scroll => {root.scrollTop = scroll;}};}
     getMode() {return this.mode;}
   }
+  let sourceReads=0;
   const view = new MarkdownView(), leaf = {view, getViewState: () => ({state: {mode: view.mode}}), getEphemeralState: () => ({cursor: 3}),
     setViewState: async state => {calls.modes.push(state.state.mode);if (options.restoreFailure && state.state.mode === 'source') throw new Error('mode restore failed');view.mode = state.state.mode;},
     setEphemeralState: () => {calls.ephemeral++;}};
@@ -35,7 +38,7 @@ function fixture(options = {}) {
     if (name === 'obsidian') return {Plugin: class {}, MarkdownView, Modal: class {}, Notice: class {}};
     if (name === 'crypto') return crypto;
     if (name === 'path') return require('node:path');
-    if (name === '/synthetic-vault/plugin/target-scan.js') return {resolveTargets, scanTargets: targeted};
+    if (name === '/synthetic-vault/plugin/target-scan.js') return {resolveTargets, scanTargets: targeted,scanVisible:async()=>{calls.visible++;root.scrollTop=100;if(options.scanFailure)throw new Error('scan failed');return {...baseReport(),scan:{full:false,complete:false,steps:1},visibleCoverage:options.incomplete?'uncovered':'complete',documentCoverage:'not-scanned'};}};
     throw new Error('Unexpected require: ' + name);
   }, fakeInspect: async (_view, _plugin, full) => {calls.inspect.push(full);root.scrollTop = 100;
     if (options.fontChanged) root.fontSize = '18px';
@@ -43,7 +46,7 @@ function fixture(options = {}) {
     if (options.scanFailure) throw new Error('scan failed');return baseReport();}});
   vm.runInContext(fs.readFileSync(require.resolve('../main.js'), 'utf8') + '\ninspect=fakeInspect;settleLayout=async()=>{};settle=async()=>{};', context);
   const plugin = new module.exports();
-  Object.assign(plugin, {manifest: {dir: 'plugin'}, busy: false, polling: false, app: {vault: {adapter, read: async () => source}, workspace: {getLeavesOfType: () => [leaf], leftSplit, rightSplit}, metadataCache: {getFileCache: () => ({sections: [{type: 'paragraph', position: {start: {line: 0}, end: {line: 0}}}]})}}});
+  Object.assign(plugin, {manifest: {dir: 'plugin'}, busy: false, polling: false, app: {vault: {adapter, read: async () => (++sourceReads>1 && options.sourceChanged ? source+'changed' : source)}, workspace: {getLeavesOfType: () => [leaf], leftSplit, rightSplit}, metadataCache: {getFileCache: () => ({sections: [{type: 'paragraph', position: {start: {line: 0}, end: {line: 0}}}]})}}});
   plugin.save = async report => {calls.saves++;if (options.saveFailure) throw new Error('save failed');return {report: {...report, archivePath: 'plugin/reports/test.json'}, cleanup: {warnings: []}};};
   return {plugin, request, view, root, calls, leftSplit, rightSplit, response: () => JSON.parse(files.get('plugin/response.json'))};
 }
@@ -134,4 +137,89 @@ test('response write failure releases busy and polling', async () => {
 test('font change with stable root width is rejected before saving', async () => {
   const f = fixture({fontChanged: true});await f.plugin.pollRequest();
   assert.equal(f.response().status, 'error');assert.equal(f.response().errorPhase, 'scan');assert.equal(f.calls.saves, 0);assert.equal(f.root.scrollTop, 55);
+});
+
+for(const incomplete of [false,true])test(`visible protocol uses actual layout and viewport coverage (${incomplete})`,async()=>{
+  const f=fixture({version:3,incomplete});let archived;
+  const save=f.plugin.save;f.plugin.save=async r=>{archived=r;return save(r);};
+  await f.plugin.pollRequest();
+  assert.equal(f.calls.visible,1);assert.deepEqual(f.calls.inspect,[]);assert.equal(f.calls.targeted,0);
+  assert.equal(f.response().status,incomplete?'incomplete':'complete');
+  assert.equal(f.response().scanMode,'visible');assert.equal(f.response().completionScope,'viewport');
+  assert.equal(f.response().documentCoverage,'not-scanned');assert.equal(f.response().file,f.request.file);
+  assert.equal(archived.requestId,f.request.id);assert.equal(archived.schemaVersion,4);
+  assert.equal(f.response().id,f.request.id);assert.equal(archived.file,f.request.file);
+  assert.equal(archived.sourceSha256,f.request.expectedSourceSha256);
+  assert.equal(f.response().sourceSha256,archived.sourceSha256);
+  assert.equal(archived.scan.steps,1);assert.equal(archived.scan.full,false);
+  assert.equal(archived.layout.contentWidthPx,700);assert.equal(f.root.scrollTop,55);
+  assert.equal(f.leftSplit.collapsed,false);assert.equal(f.rightSplit.collapsed,false);
+});
+for(const options of [{scanFailure:true},{sourceChanged:true},{saveFailure:true},{responseFailure:true},{dockFailure:'left'},{mode:'source',restoreFailure:true},{closeFailure:'left'}])test(`visible failure restores state without full fallback ${JSON.stringify(options)}`,async()=>{
+  if(options.responseFailure){
+    const f=fixture({version:3,...options});await assert.rejects(f.plugin.pollRequest(),/response denied/);
+    assert.equal(f.calls.visible,1);assert.deepEqual(f.calls.inspect,[]);assert.equal(f.calls.targeted,0);
+    assert.equal(f.root.scrollTop,55);assert.equal(f.leftSplit.collapsed,false);assert.equal(f.rightSplit.collapsed,false);
+    assert.equal(f.plugin.busy,false);assert.equal(f.plugin.polling,false);return;
+  }
+  const f=fixture({version:3,...options});await f.plugin.pollRequest();
+  assert.equal(f.response().status,'error');assert.deepEqual(f.calls.inspect,[]);assert.equal(f.calls.targeted,0);
+  if(options.mode!=='source')assert.equal(f.root.scrollTop,55);
+  else assert.equal(f.response().errorPhase,'restore');
+  assert.equal(f.rightSplit.collapsed,false);assert.equal(f.plugin.busy,false);
+  assert.equal(f.response().scanMode,'visible');assert.equal(f.response().sourceSha256,f.request.expectedSourceSha256);
+  assert.equal(f.calls.visible,options.closeFailure?0:1);assert.equal(f.plugin.polling,false);
+});
+test('local-only target protocol forwards the no-fallback contract',async()=>{
+  const f=fixture({version:3,scanMode:'targets'});let options;
+  f.plugin.runtimeModule=()=>({resolveTargets,scanTargets:async(v,p,t,s,h,o)=>{options=o;return {schemaVersion:3,sourceSha256:f.request.expectedSourceSha256,scan:{full:false,steps:1,complete:false},blocks:[],skipped:[],targeting:{coverage:'uncovered',result:'uncovered',scanMethod:'visible',targets:[]}};}});
+  await f.plugin.pollRequest();assert.equal(options.localOnly,true);assert.equal(f.response().status,'incomplete');assert.equal(f.response().schemaVersion,3);
+});
+
+test('visible request accepts actual non-default geometry',async()=>{
+  const f=fixture({version:3,width:637,fontSize:'17px'});let archived;
+  const save=f.plugin.save;f.plugin.save=async r=>{archived=r;return save(r);};
+  await f.plugin.pollRequest();assert.equal(f.response().status,'complete');
+  assert.equal(archived.layout.contentWidthPx,637);assert.equal(archived.layout.fontSizePx,17);
+});
+test('source changed during visible measurement is rejected before archive save',async()=>{
+  const f=fixture({version:3,sourceChanged:true});await f.plugin.pollRequest();
+  assert.equal(f.response().status,'error');assert.equal(f.response().errorPhase,'scan');
+  assert.equal(f.calls.saves,0);assert.deepEqual(f.calls.inspect,[]);assert.equal(f.root.scrollTop,55);
+});
+
+for(const version of [1,2,3,4])test(`removed active selection is rejected by schema ${version} before scanning`,async()=>{
+  // Even with a valid explicit file/hash, old protocols must not silently ignore the removed selector.
+  const f=fixture({version,requestFields:{fileSelector:'active',scanMode:'visible',localOnly:false}});
+  await f.plugin.pollRequest();
+  assert.equal(f.response().status,'error');assert.equal(f.response().errorPhase,'request');
+  assert.equal(f.calls.visible,0);assert.equal(f.calls.targeted,0);assert.equal(f.calls.saves,0);
+  assert.deepEqual(f.calls.inspect,[]);assert.deepEqual(f.calls.expanded,[]);
+  assert.equal(f.plugin.busy,false);assert.equal(f.plugin.polling,false);
+});
+test('schema 4 without a selector is still unsupported',async()=>{
+  const f=fixture({version:4});await f.plugin.pollRequest();
+  assert.equal(f.response().status,'error');assert.match(f.response().error,/schemaVersion 1\/2\/3/);
+  assert.equal(f.calls.visible,0);assert.deepEqual(f.calls.inspect,[]);
+});
+for(const requestFields of [{file:undefined},{expectedSourceSha256:'f'.repeat(64)}])test(`explicit viewport rejects missing path or stale source before measurement ${JSON.stringify(requestFields)}`,async()=>{
+  const f=fixture({version:3,requestFields});await f.plugin.pollRequest();
+  assert.equal(f.response().status,'error');assert.equal(f.response().errorPhase,'request');
+  assert.equal(f.calls.visible,0);assert.equal(f.calls.saves,0);assert.deepEqual(f.calls.inspect,[]);
+  assert.deepEqual(f.calls.expanded,[]);assert.equal(f.root.scrollTop,55);
+});
+
+test('visible incomplete response counts confirmed suspects and preserves diagnostic blocks',async()=>{
+  const f=fixture({version:3});let archived;
+  f.plugin.runtimeModule=()=>({scanVisible:async()=>({file:f.request.file,sourceSha256:f.request.expectedSourceSha256,
+    scan:{full:false,complete:false,steps:1},visibleCoverage:'uncovered',documentCoverage:'not-scanned',
+    blocks:[{suspected:true,capture:{coverage:'complete',eligibleForEdit:true}},
+            {suspected:true,capture:{coverage:'uncovered',eligibleForEdit:false}}],
+    skipped:[{kind:'table',coverage:'uncovered'}]})});
+  const save=f.plugin.save;f.plugin.save=async r=>{archived=r;return save(r);};
+  await f.plugin.pollRequest();
+  assert.equal(f.response().status,'incomplete');assert.equal(f.response().suspected,1);
+  assert.equal(f.response().blocks,2);assert.equal(archived.blocks.length,2);
+  assert.equal(archived.blocks[0].capture.eligibleForEdit,true);assert.equal(f.calls.saves,1);
+  assert.deepEqual(f.calls.inspect,[]);assert.equal(f.root.scrollTop,55);
 });

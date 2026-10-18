@@ -88,9 +88,11 @@ def verify_report(response, request, root, plugin):
                        ('sourceSha256', request['expectedSourceSha256'])]:
         if report.get(key) != value:
             raise SystemExit('Response archive identity mismatch: ' + key)
-    if request['schemaVersion'] == 2:
+    if request['schemaVersion'] == 3:
+        verify_scoped_identity(response, request, report, (root / request['file']).read_bytes().decode('utf-8'))
+    if request['schemaVersion'] == 2 or request.get('scanMode') == 'targets':
         targeting = report.get('targeting', {})
-        if response.get('schemaVersion') != 2 or report.get('schemaVersion') != 3 or not isinstance(targeting, dict):
+        if response.get('schemaVersion') != request['schemaVersion'] or report.get('schemaVersion') != (4 if request['schemaVersion'] == 3 else 3) or not isinstance(targeting, dict):
             raise SystemExit('Plugin did not return the targeted-scan protocol')
         if response.get('sourceSha256') != request['expectedSourceSha256']:
             raise SystemExit('Response identity mismatch: sourceSha256')
@@ -142,6 +144,119 @@ def verify_report(response, request, root, plugin):
                         type(target.get('measuredBlocks')) is not int or target['measuredBlocks'] <= 0):
                     raise SystemExit('Target source-block coverage evidence is incomplete')
     return report
+
+
+def verify_scoped_identity(response, request, report, source):
+    mode = request['scanMode']
+    if report.get('archivePath') != response.get('archivePath'):
+        raise SystemExit('Response archive identity mismatch: archivePath')
+    for key, value in [('schemaVersion', 3), ('file', request['file']),
+                       ('sourceSha256', request['expectedSourceSha256']), ('scanMode', mode),
+                       ('localOnly', request.get('localOnly', False)), ('scanMethod', 'visible'),
+                       ('documentCoverage', 'not-scanned')]:
+        if response.get(key) != value:
+            raise SystemExit('Response identity mismatch: ' + key)
+    if (report.get('schemaVersion') != 4 or report.get('scanMode') != mode or
+            report.get('localOnly') is not request.get('localOnly', False) or
+            report.get('documentCoverage') != 'not-scanned' or
+            report.get('scan', {}).get('full') is not False or
+            report.get('scan', {}).get('complete') is not False or
+            report.get('scan', {}).get('steps') != 1):
+        raise SystemExit('Scoped scan mode/coverage mismatch; full fallback is forbidden')
+    layout = report.get('layout', {})
+    if any(type(layout.get(k)) not in (int, float) or not math.isfinite(layout[k]) or layout[k] <= 0
+           for k in ('contentWidthPx', 'fontSizePx')) or layout.get('sidebarsClosed') is not True:
+        raise SystemExit('Actual layout evidence missing')
+    if mode == 'targets' and response.get('status') == 'complete':
+        blocks = report.get('blocks')
+        if (not isinstance(blocks, list) or not blocks or response.get('blocks') != len(blocks) or
+                response.get('suspected') != sum(b.get('suspected') is True for b in blocks)):
+            raise SystemExit('Local target measurement count mismatch')
+        for block in blocks:
+            start, end = block.get('sourceStartLine'), block.get('sourceEndLine')
+            unit = block.get('measurementUnit', {})
+            if (type(start) is not int or type(end) is not int or type(block.get('suspected')) is not bool or
+                    not any(t['startLine'] <= start <= end <= t['endLine'] for t in request['targets']) or
+                    block.get('sourceMapping', {}).get('status') != 'mapped' or
+                    unit.get('type') == 'paragraph' and (unit.get('complete') is not True or unit.get('reasons') != [])):
+                raise SystemExit('Local target measurement identity/completeness mismatch')
+    if mode == 'visible':
+        if response.get('completionScope') != 'viewport' or report.get('completionScope') != 'viewport':
+            raise SystemExit('Viewport completionScope mismatch')
+        coverage = report.get('visibleCoverage')
+        if (coverage not in ('complete', 'uncovered') or response.get('visibleCoverage') != coverage or
+                (response.get('status') == 'complete') != (coverage == 'complete')):
+            raise SystemExit('Viewport coverage/status mismatch')
+        blocks, skipped = report.get('blocks'), report.get('skipped')
+        targets = report.get('capturedTargets')
+        if not isinstance(blocks, list) or not isinstance(skipped, list) or not isinstance(targets, list):
+            raise SystemExit('Viewport measurement evidence missing')
+        if (response.get('blocks') != len(blocks) or response.get('skipped') != len(skipped) or
+                response.get('suspected') != sum(b.get('suspected') is True and
+                    b.get('capture', {}).get('coverage') == 'complete' for b in blocks)):
+            raise SystemExit('Viewport measurement count mismatch')
+        lines = source.split('\n')
+        for target in targets:
+            requested = target.get('requested', {})
+            start, end = requested.get('startLine'), requested.get('endLine')
+            if (requested.get('kind') != 'lines' or type(start) is not int or type(end) is not int or
+                    not 1 <= start <= end <= len(lines) or
+                    target.get('ranges') != [{'startLine': start, 'endLine': end}] or
+                    requested.get('text') != '\n'.join(lines[start - 1:end])):
+                raise SystemExit('Captured target source identity mismatch')
+        excluded = []
+        for item in skipped:
+            if item.get('coverage') != 'excluded':
+                continue
+            start, end, path = item.get('sourceStartLine'), item.get('sourceEndLine'), item.get('domPath')
+            if (item.get('kind') != '代码块' or item.get('sourceMapping', {}).get('status') != 'mapped' or
+                    type(start) is not int or type(end) is not int or not 1 <= start <= end <= len(lines) or
+                    not isinstance(path, str) or re.fullmatch(r'(?:[0-9]+(?:\.[0-9]+)*)?', path) is None or
+                    item.get('key') != f'{start - 1}:{end - 1}:{path}'):
+                raise SystemExit('Protected code exclusion identity mismatch')
+            excluded.append(item)
+        if coverage == 'complete':
+            if (not (blocks or excluded) or len(excluded) != len(skipped) or report.get('visibleReasons') != [] or
+                    blocks and not targets or report['scan'].get('missingSourceLocations') is not False or
+                    any(t.get('coverage') != 'complete' or t.get('resolved') is not True or t.get('reasons') != [] or
+                        t.get('mappingGaps') != [] or not t.get('expected') or not t.get('measuredBlocks') for t in targets)):
+                raise SystemExit('Viewport coverage evidence incomplete')
+        keys = set()
+        for block in blocks:
+            capture = block.get('capture', {})
+            confirmed = capture.get('coverage') == 'complete'
+            if capture.get('eligibleForEdit') is True and not confirmed:
+                raise SystemExit('Uncovered viewport block cannot be editable')
+            if coverage != 'complete' and not confirmed:
+                continue
+            start, end, path = block.get('sourceStartLine'), block.get('sourceEndLine'), block.get('domPath')
+            matches = [t for t in targets if t.get('ranges') == [{'startLine': start, 'endLine': end}]]
+            if (type(start) is not int or type(end) is not int or not 1 <= start <= end <= len(lines) or
+                    type(block.get('suspected')) is not bool or not isinstance(path, str) or
+                    re.fullmatch(r'(?:[0-9]+(?:\.[0-9]+)*)?', path) is None or
+                    block.get('key') != f'{start - 1}:{end - 1}:{path}' or block['key'] in keys or
+                    block.get('sourceMapping', {}).get('status') != 'mapped' or len(matches) != 1):
+                raise SystemExit('Viewport block identity/mapping incomplete')
+            unit = block.get('measurementUnit', {})
+            if unit.get('type') == 'paragraph' and (unit.get('complete') is not True or unit.get('reasons') != []):
+                raise SystemExit('Viewport paragraph measurement incomplete')
+            if confirmed and (unit.get('type') != 'paragraph' or block.get('protectedContent') is not False or
+                    type(block.get('lineCount')) is not int or block['lineCount'] < 1 or
+                    type(block.get('availableWidthPx')) not in (int, float) or
+                    not math.isfinite(block['availableWidthPx']) or block['availableWidthPx'] <= 0):
+                raise SystemExit('Confirmed viewport paragraph geometry incomplete')
+            if capture.get('eligibleForEdit') is True:
+                target = matches[0]
+                expected = target.get('expected', [])
+                if (target.get('coverage') != 'complete' or target.get('resolved') is not True or
+                        target.get('reasons') != [] or target.get('mappingGaps') != [] or
+                        len(expected) != 1 or expected[0].get('type') != 'paragraph' or
+                        expected[0].get('startLine') != start or expected[0].get('endLine') != end or
+                        capture.get('editReasons') != [] or block.get('suspected') is not True or
+                        sum(type(b.get('sourceStartLine')) is int and b['sourceStartLine'] <= end and
+                            type(b.get('sourceEndLine')) is int and b['sourceEndLine'] >= start for b in blocks) != 1):
+                    raise SystemExit('Viewport edit eligibility evidence incomplete')
+            keys.add(block['key'])
 
 
 def target_range_matches(report, expected):
@@ -231,6 +346,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('note', help='Vault-relative note path')
     parser.add_argument('--vault', required=True, help='Path to the target vault root')
+    parser.add_argument('--visible-only', action='store_true', help='Scan the settled current viewport once; never full fallback')
+    parser.add_argument('--local-only', action='store_true', help='Target recheck without full fallback; requires targets and source hash')
     parser.add_argument('--width', type=float, default=700)
     parser.add_argument('--font-size', type=float, default=16)
     parser.add_argument('--timeout', type=float, default=30)
@@ -249,12 +366,24 @@ def main():
         parser.error('Note must exist inside the vault')
     source = note.read_bytes()
     targets = parse_targets(args, parser, len(source.decode('utf-8').split('\n')))
+    if args.visible_only and (targets or args.local_only):
+        parser.error('--visible-only cannot be combined with targets or --local-only')
+    if args.local_only and (not targets or not args.expected_source_sha256):
+        parser.error('--local-only requires targets and --expected-source-sha256')
     source_hash = hashlib.sha256(source).hexdigest()
     if args.expected_source_sha256 is not None:
         if len(args.expected_source_sha256) != 64 or any(c not in '0123456789abcdef' for c in args.expected_source_sha256):
             parser.error('Expected source hash must be a lowercase SHA-256')
         if source_hash != args.expected_source_sha256:
             parser.error('Source changed since target location; reread and resolve the target')
+    if args.local_only:
+        for target in targets:
+            if target.get('kind') != 'lines' or 'startLine' not in target or 'endLine' not in target:
+                parser.error('--local-only requires exact source line targets')
+            text = '\n'.join(source.decode('utf-8').split('\n')[target['startLine'] - 1:target['endLine']])
+            if 'text' in target and target['text'] != text:
+                parser.error('Local target text differs from the current source range')
+            target['text'] = text
     if args.select_paragraph is not None:
         if (not args.select_paragraph.strip() or not args.expected_source_sha256 or not args.include_request or
                 len(targets) != 1 or
@@ -270,6 +399,9 @@ def main():
                'file': note.relative_to(root).as_posix(), 'expectedSourceSha256': source_hash,
                'expectedLayout': {'contentWidthPx': args.width, 'fontSizePx': args.font_size},
                'temporaryReadingLayout': True, 'expiresAt': int((time.time() + args.timeout) * 1000)}
+    if args.visible_only or args.local_only:
+        request.update(schemaVersion=3, scanMode='visible' if args.visible_only else 'targets', localOnly=args.local_only)
+        del request['expectedLayout']
     if targets:
         request['targets'] = targets
     # This is a single-request mailbox. Calling clients must serialize requests.
@@ -284,11 +416,13 @@ def main():
         if response.get('id') == request['id']:
             report = None
             paragraph_acceptance = {'coverage': 'uncovered', 'selectedBlock': None}
+            if (args.visible_only or args.local_only) and hashlib.sha256(note.read_bytes()).hexdigest() != source_hash:
+                raise SystemExit('Source changed before response acceptance; reread and resolve the target')
             if response.get('status') in ('complete', 'incomplete'):
                 report = verify_report(response, request, root, plugin)
                 if args.select_paragraph is not None:
                     paragraph_acceptance = verify_paragraph_report(response, request, report, args.select_paragraph)
-            if args.expected_source_sha256 is not None and hashlib.sha256(note.read_bytes()).hexdigest() != source_hash:
+            if (args.expected_source_sha256 is not None or args.visible_only or args.local_only) and hashlib.sha256(note.read_bytes()).hexdigest() != source_hash:
                 raise SystemExit('Source changed before response acceptance; reread and resolve the target')
             output = {'request': request, 'response': response} if args.include_request else response
             if args.select_paragraph is not None:

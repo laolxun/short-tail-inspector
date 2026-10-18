@@ -5,14 +5,14 @@ const fs=require('node:fs');
   const browser=await chromium.launch({headless:true,...(process.env.CHROME_EXECUTABLE?{executablePath:process.env.CHROME_EXECUTABLE}:{})});
   try{
     const page=await browser.newPage();
-    await page.setContent('<style>.markdown-preview-view{width:360px;height:150px;overflow:auto;transition:width 80ms linear}p{font:16px sans-serif;line-height:24px}</style><div id="container"><div class="markdown-preview-view">'+Array.from({length:20},()=>'<div><p>合成段落用于验证收栏后的扫描和恢复位置，真实笔记不会参与此测试。</p></div>').join('')+'</div></div>');
+    await page.setContent('<style>.markdown-preview-view{width:360px;height:150px;overflow:auto;transition:width 80ms linear}p{font:16px sans-serif;line-height:24px}</style><div id="container"><div class="markdown-preview-view"><div class="markdown-preview-sizer">'+Array.from({length:20},()=>'<div><p>合成段落用于验证收栏后的扫描和恢复位置，真实笔记不会参与此测试。</p></div>').join('')+'</div></div></div>');
     await page.evaluate(()=>{
       window.modals=[];window.notices=[];
       window.MarkdownViewFixture=class {};
       window.module={exports:{}};
       HTMLElement.prototype.createEl=function(tag,options){const el=document.createElement(tag);el.textContent=options?.text||'';this.appendChild(el);return el;};
       window.require=name=>{
-        if(name==='crypto')return {createHash:()=>({update(){return this;},digest(){return 'synthetic-hash';}})};
+        if(name==='crypto')return {createHash:()=>({update(){return this;},digest(){return 'a'.repeat(64);}})};
         if(name!=='obsidian')throw Error('unexpected module '+name);
         return {Plugin:class {},MarkdownView:window.MarkdownViewFixture,
           Notice:class {constructor(text){window.notices.push(text);}},
@@ -20,6 +20,7 @@ const fs=require('node:fs');
       };
     });
     await page.addScriptTag({content:fs.readFileSync(require.resolve('../main.js'),'utf8')+'\nwindow.LayoutContextsFixture=LayoutContexts;window.inspectFixture=inspect;window.settleLayoutFixture=settleLayout;'});
+    await page.addScriptTag({content:'{const module={exports:{}};'+fs.readFileSync(require.resolve('../target-scan.js'),'utf8')+';window.targetFixture=module.exports;}'});
     const checks=await page.evaluate(async()=>{
       const root=document.querySelector('.markdown-preview-view'),source=Array.from({length:20},()=> '合成段落').join('\n');
       const view=new window.MarkdownViewFixture();
@@ -51,7 +52,26 @@ const fs=require('node:fs');
       await plugin.run(true,true);
       if(!window.notices.some(n=>n.includes('阅读宽度发生变化')) || saved.length || window.modals.length)throw Error('actual scan width change was not rejected');
       if(root.scrollTop!==17 || root.clientWidth!==360 || left.collapsed || right.collapsed || plugin.busy)throw Error('width failure recovery failed');
-      return {checks:checked+1,animatedSidebarScans:checked,actualWidthGuard:true,scrollRestored:true};
+      const files=new Map();plugin.manifest={dir:'plugin'};
+      plugin.app.vault.adapter={exists:async p=>files.has(p),read:async p=>files.get(p),write:async(p,v)=>files.set(p,v)};
+      plugin.app.workspace.getLeavesOfType=()=>[view.leaf];
+      Object.assign(view.leaf,{getViewState:()=>({state:{mode:'preview'}}),getEphemeralState:()=>({}),setEphemeralState(){}});
+      plugin.runtimeModule=()=>window.targetFixture;
+      const scans=[];
+      for(const fail of [false,true]){
+        root.scrollTop=17;saved.length=0;
+        inspect=(...args)=>{scans.push(args[2]);if(fail)throw Error('injected viewport failure');return window.inspectFixture(...args);};
+        files.set('plugin/request.json',JSON.stringify({schemaVersion:3,action:'scan',id:'visible-'+fail,file:view.file.path,expectedSourceSha256:'a'.repeat(64),scanMode:'visible',localOnly:false,temporaryReadingLayout:true,expiresAt:Date.now()+30000}));
+        // save() stays in memory; no filesystem or report cleanup in this fixture.
+        plugin.save=async report=>{saved.push(report);return {report:{archivePath:'plugin/reports/synthetic.json'},cleanup:{warnings:[]}};};
+        await plugin.pollRequest();
+        const response=JSON.parse(files.get('plugin/response.json'));
+        if(response.status!==(fail?'error':'incomplete'))throw Error('viewport request status '+JSON.stringify(response));
+        if(!fail && (saved[0].scan.steps!==1 || saved[0].layout.contentWidthPx!==480 || saved[0].scan.full))throw Error('viewport scan must measure once after animated resize');
+        if(root.scrollTop!==17 || left.collapsed || right.collapsed || root.clientWidth!==360 || plugin.busy)throw Error('viewport request restoration failed');
+      }
+      if(scans.length!==2 || scans.some(Boolean))throw Error('viewport request started full scan');
+      return {checks:checked+3,visibleRequestChecks:2,animatedSidebarScans:checked,actualWidthGuard:true,scrollRestored:true};
     });
     console.log(JSON.stringify(checks,null,2));
   }finally{await browser.close();}

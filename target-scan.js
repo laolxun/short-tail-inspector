@@ -111,6 +111,13 @@ function unmappedScope(root, plugin, source, file, hooks) {
 
 function renderGroups(root, plugin, source, file, hooks, wantedRanges) {
   const groups = new Map();
+  const include = el => {
+    if(!hooks.includeNode || hooks.includeNode(el))return true;
+    // A captured source container still owes all its nodes, including siblings
+    // outside the viewport. Never turn a partial container into full coverage.
+    const sec=trustedSection(el,plugin,source,file,hooks);
+    return sec && wantedRanges.some(r=>intersects(r,{startLine:sec.start+1,endLine:sec.end+1}));
+  };
   const cache = plugin.app.metadataCache.getFileCache(plugin.app.vault.getAbstractFileByPath?.(file) || {path:file}) || {};
   const scope = unmappedScope(root, plugin, source, file, hooks), mappingGaps = [];
   const unknown = (el, kind, fromHrBranch = false) => {
@@ -149,11 +156,12 @@ function renderGroups(root, plugin, source, file, hooks, wantedRanges) {
     return {group, sec};
   };
   for (const el of root.querySelectorAll(hooks.SELECTOR)) {
+    if(!include(el))continue;
     if (el.closest('table,.frontmatter,.metadata-container,.markdown-embed') ||
         (el.tagName === 'P' && el.closest('pre')) || (el.tagName === 'LI' && el.querySelector(':scope > p'))) continue;
     const found = get(el);
     // Unmapped text could belong to a target; it cannot be silently excluded.
-    if (!found) {if (found === null && el.textContent.trim()) unknown(el, 'text');continue;}
+    if (!found) {if ((found === null || hooks.includeNode?.(el) && !/^H[1-6]$/.test(el.tagName)) && el.textContent.trim()) unknown(el, 'text');continue;}
     if (/^H[1-6]$/.test(el.tagName)) found.group.headings.push(el);
     else {
       found.group.nodes.set(`${found.sec.start}:${found.sec.end}:${hooks.elementPath(el, found.sec.owner)}`, el);
@@ -176,12 +184,14 @@ function renderGroups(root, plugin, source, file, hooks, wantedRanges) {
     }
   }
   for (const el of root.querySelectorAll('table,.markdown-embed,.callout.is-collapsed,img,svg,canvas,.mermaid')) {
+    if(!include(el))continue;
     if (el.closest('.frontmatter,.metadata-container,.callout-icon,.callout-fold,.collapse-indicator,.heading-collapse-indicator,button,.copy-code-button,.sr-only')) continue;
     const found = get(el);
     if (found) found.group.unsupported.push(el);
-    else if (found === null) unknown(el, 'unsupported');
+    else if (found === null || hooks.includeNode?.(el)) unknown(el, 'unsupported');
   }
   for (const el of root.querySelectorAll('.callout')) {
+    if(!include(el))continue;
     if (el.closest('.markdown-embed')) continue;
     const found = get(el);
     if (found) {
@@ -189,7 +199,7 @@ function renderGroups(root, plugin, source, file, hooks, wantedRanges) {
       const section = (cache.sections || []).filter(s => sectionRange(s).startLine === found.sec.start + 1 && sectionRange(s).endLine === found.sec.end + 1);
       if (section.length !== 1 || !['callout', 'list'].includes(section[0].type)) found.group.calloutIssues.push('Callout 子范围缺少可信区块 metadata');
       else if (section[0].type === 'callout') found.group.calloutIssues.push(...calloutIssues(el, found.sec, source));
-    } else if (found === null) unknown(el, 'unsupported');
+    } else if (found === null || hooks.includeNode?.(el)) unknown(el, 'unsupported');
   }
   for (const group of groups.values()) {
     const section = (cache.sections || []).filter(s => sectionRange(s).startLine === group.startLine && sectionRange(s).endLine === group.endLine);
@@ -210,6 +220,7 @@ function renderGroups(root, plugin, source, file, hooks, wantedRanges) {
   // Inspect any instantiated separator owner too: a source-only exemption must
   // never hide unexpected rendered text, even outside the scanner selector.
   for (const el of root.querySelectorAll('hr')) {
+    if(!include(el))continue;
     const found = get(el);
     if (found && found.sec.owner.textContent.trim()) found.group.unsupported.push(el);
     else if (found === null && el.parentElement?.textContent.trim()) unknown(el, 'text', true);
@@ -520,7 +531,7 @@ class TargetTracker {
     nodes = elements();
     return nodes.length > 0 && nodes.every(el => fullyVisible(el, root));
   }
-  filter(report, method) {
+  filter(report, method, strict = false) {
     const allBlocks = report.blocks;
     const targets = this.targets.map(target => {
       const coverageGaps = this.gapsFor(target);
@@ -535,6 +546,7 @@ class TargetTracker {
       }
       const selected = allBlocks.filter(block => block.sourceStartLine != null &&
         target.ranges.some(r => intersects(r, {startLine: block.sourceStartLine, endLine: block.sourceEndLine})));
+      if(strict && selected.some(b=>b.measurementUnit?.type==='paragraph' && (b.measurementUnit.complete!==true || b.measurementUnit.reasons?.length!==0)))reasons.push('目标段落含未完整测量的字符');
       return {...target, coverage: reasons.length ? 'uncovered' : 'complete', reasons: [...new Set(reasons)],
         mappingGaps: coverageGaps, measuredBlocks: selected.length, suspected: selected.filter(b => b.suspected).length};
     });
@@ -552,7 +564,8 @@ class TargetTracker {
   }
 }
 
-async function scanTargets(view, plugin, input, source, hooks) {
+async function scanTargets(view, plugin, input, source, hooks, options = {}) {
+  if(options.localOnly && view.previewMode.get()!==source)throw new Error('阅读视图尚未同步最新文件');
   const targets = resolveTargets(input, source, plugin.app.metadataCache.getFileCache(view.file) || {});
   const tracker = new TargetTracker(targets, plugin, source, view.file.path, hooks);
   let local = false;
@@ -563,8 +576,95 @@ async function scanTargets(view, plugin, input, source, hooks) {
     await hooks.settleLayout(root);
     local = await tracker.localize(view);
   }
-  const report = await hooks.inspect(view, plugin, !local, (root, result) => tracker.observe(root, result));
-  return tracker.filter(report, local ? 'visible' : 'full');
+  const report = await hooks.inspect(view, plugin, options.localOnly ? false : !local, (root, result) => tracker.observe(root, result));
+  return tracker.filter(report, local || options.localOnly ? 'visible' : 'full', options.localOnly===true);
 }
 
-module.exports = {resolveTargets, TargetTracker, scanTargets};
+// One measurement pass at the settled viewport. Coverage is limited to captured
+// source containers; boundary clipping and unknown visible content fail closed.
+async function scanVisible(view, plugin, source, hooks) {
+  if(view.previewMode.get()!==source)throw new Error('阅读视图尚未同步最新文件');
+  let tracker,unmeasuredVisibleText=false;
+  const excludedKeys=new Set(),excludedNodes=new Set();
+  const report=await hooks.inspect(view,plugin,false,(root,result)=>{
+    const bounds=viewportFor(root);
+    // Bind exclusions to collect()'s existing source and DOM identities. Unknown
+    // PRE text is not exempt merely because it resembles protected code.
+    for(const skipped of result.skipped){
+      if(skipped.kind!=='代码块' || skipped.sourceMapping?.status!=='mapped' ||
+          !Number.isInteger(skipped.sourceStartLine) || !Number.isInteger(skipped.sourceEndLine) ||
+          skipped.key!==`${skipped.sourceStartLine-1}:${skipped.sourceEndLine-1}:${skipped.domPath}`)continue;
+      const nodes=[...root.querySelectorAll('pre')].filter(el=>hooks.elementPath(el,root)===skipped.renderDomPath);
+      if(nodes.length===1){excludedKeys.add(skipped.key);excludedNodes.add(nodes[0]);}
+    }
+    const inExcludedCode=el=>[...excludedNodes].some(pre=>pre===el || pre.contains(el));
+    const includeNode=el=>{if(inExcludedCode(el))return false;const r=el.getBoundingClientRect();return r.width>0 && r.height>0 && r.bottom>bounds.top && r.top<bounds.bottom && r.right>bounds.left && r.left<bounds.right;};
+    // Also account for visible text outside the collector's supported selectors.
+    const walker=root.ownerDocument.createTreeWalker(root,4);let text;
+    while((text=walker.nextNode())){
+      if(!text.nodeValue.trim() || inExcludedCode(text.parentElement) || text.parentElement.closest('h1,h2,h3,h4,h5,h6,.frontmatter,.metadata-container,button,.copy-code-button,.sr-only'))continue;
+      const range=root.ownerDocument.createRange();range.selectNodeContents(text);
+      const onScreen=Array.from(range.getClientRects()).some(r=>r.width>0 && r.height>0 && r.bottom>bounds.top && r.top<bounds.bottom && r.right>bounds.left && r.left<bounds.right);
+      if(onScreen && !result.blocks.some(b=>b.renderNode?.contains(text)))unmeasuredVisibleText=true;
+    }
+    const inputs=[...new Map([...result.blocks,...result.skipped.filter(b=>!excludedKeys.has(b.key))].filter(b=>Number.isInteger(b.sourceStartLine)&&Number.isInteger(b.sourceEndLine))
+      .map(b=>[`${b.sourceStartLine}:${b.sourceEndLine}`,{kind:'lines',startLine:b.sourceStartLine,endLine:b.sourceEndLine,text:source.split('\n').slice(b.sourceStartLine-1,b.sourceEndLine).join('\n')}])).values()];
+    // resolveTargets' request limit does not limit the number of visible blocks.
+    const targets=inputs.map((input,index)=>({...resolveTargets([input],source,plugin.app.metadataCache.getFileCache(view.file)||{})[0],index}));
+    tracker=new TargetTracker(targets,plugin,source,view.file.path,{...hooks,includeNode});
+    tracker.observe(root,result);
+  });
+  if(!tracker || report.scan.full || report.scan.steps!==1)throw new Error('视口扫描次数或模式异常');
+  const scoped=tracker.filter(report,'visible');
+  const reasons=[];
+  if(unmeasuredVisibleText)reasons.push('视口存在未纳入测量的文本');
+  if(!scoped.targeting.targets.length && !excludedKeys.size)reasons.push('当前视口没有可核对的完整测量目标');
+  if([...tracker.mappingGaps.values()].length)reasons.push('可见内容存在未知或未支持的源码映射');
+  if(report.scan.missingSourceLocations)reasons.push('测量块缺少源码位置');
+  if(report.blocks.some(b=>b.measurementUnit?.type==='paragraph' && (b.measurementUnit.complete!==true || b.measurementUnit.reasons?.length!==0)))reasons.push('段落测量完整性无法确认');
+  const skipped=report.skipped.map(item=>({...item,coverage:excludedKeys.has(item.key)?'excluded':'uncovered'}));
+  if(skipped.some(item=>item.coverage==='uncovered' && item.kind==='表格'))reasons.push('视口存在未覆盖的表格（未支持测量）');
+  if(skipped.some(item=>item.coverage==='uncovered' && item.kind!=='表格'))reasons.push('当前视口存在未完整测量或映射不可信的内容');
+  if(scoped.targeting.coverage!=='complete')reasons.push('捕捉的源区块覆盖不完整');
+  const capturedTargets=scoped.targeting.targets;
+  const blocks=report.blocks.map(block=>{
+    const matches=capturedTargets.filter(t=>t.ranges.some(r=>r.startLine===block.sourceStartLine&&r.endLine===block.sourceEndLine));
+    const measured=matches.length===1 && matches[0].coverage==='complete' && block.sourceMapping?.status==='mapped' &&
+      block.measurementUnit?.type==='paragraph' && block.measurementUnit.complete===true && block.measurementUnit.reasons?.length===0 && !block.protectedContent;
+    // collect() already located this node through sourceMappingFor(). A complete
+    // P measurement proves geometry, not that its source owner is one standalone
+    // Markdown paragraph. Check that existing identity; never search/re-map text.
+    const editReasons=[];
+    if(!measured)editReasons.push('缺少完整段落测量或可信源码覆盖');
+    const expected=matches.length===1?matches[0].expected:[];
+    if(expected.length!==1 || expected[0].type!=='paragraph' ||
+        expected[0].startLine!==block.sourceStartLine || expected[0].endLine!==block.sourceEndLine)
+      editReasons.push('源码范围不是唯一且完整的 paragraph 区块');
+    const node=block.renderNode;
+    if(node?.tagName!=='P' || !tracker.root.contains(node) ||
+        node.closest('blockquote,.callout,.callout-content,.callout-title,li,ul,ol'))
+      editReasons.push('渲染节点不是独立正文段落');
+    if(report.blocks.filter(other=>Number.isInteger(other.sourceStartLine) &&
+        intersects({startLine:block.sourceStartLine,endLine:block.sourceEndLine},
+          {startLine:other.sourceStartLine,endLine:other.sourceEndLine})).length!==1)
+      editReasons.push('源码范围关联多个测量节点');
+    if(block.suspected!==true)editReasons.push('未标为疑似短尾');
+    // Display evidence is local to this independently mapped paragraph. Unknown
+    // siblings outside its source owner cannot erase its completed measurement.
+    // Keep the existing editReasons/eligibleForEdit gate unchanged.
+    const group=tracker.groups.get(`${block.sourceStartLine-1}:${block.sourceEndLine-1}`);
+    const ownGaps=[...tracker.mappingGaps].filter(([key])=>
+      group && [...group.owners].some(owner=>owner.contains(key.node) || key.node.contains(owner))).map(([,gap])=>gap);
+    const locallyMeasured=block.sourceMapping?.status==='mapped' && block.measurementUnit?.type==='paragraph' && block.measurementUnit.complete===true &&
+      group?.nodes.size===1 && group.owners.size===1 &&
+      block.measurementUnit.reasons?.length===0 && !block.protectedContent && expected.length===1 &&
+      expected[0].type==='paragraph' && expected[0].startLine===block.sourceStartLine && expected[0].endLine===block.sourceEndLine &&
+      node?.tagName==='P' && !node.closest('blockquote,.callout,.callout-content,.callout-title,li,ul,ol') &&
+      fullyVisible(node,tracker.root) && tracker.reasons(matches[0],tracker.groups,true,ownGaps).length===0;
+    return {...block,capture:{coverage:measured || locallyMeasured?'complete':'uncovered',eligibleForEdit:editReasons.length===0,editReasons}};
+  });
+  return {...report,schemaVersion:4,scanMode:'visible',documentCoverage:'not-scanned',completionScope:'viewport',
+    visibleCoverage:reasons.length?'uncovered':'complete',visibleReasons:reasons,capturedTargets,blocks,skipped};
+}
+
+module.exports = {resolveTargets, TargetTracker, scanTargets, scanVisible};

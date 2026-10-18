@@ -373,22 +373,26 @@ module.exports=class ShortTailInspector extends Plugin {
       if(await adapter.exists(`${dir}/response.json`)) {
         try{if(JSON.parse(await adapter.read(`${dir}/response.json`)).id===request.id)return;}catch{}
       }
-      if(![1,2].includes(request.schemaVersion) || request.action!=='scan')throw new Error('仅支持 schemaVersion 1/2 的 scan 请求');
+      if(![1,2,3].includes(request.schemaVersion) || request.action!=='scan')throw new Error('仅支持 schemaVersion 1/2/3 的 scan 请求');
+      if(request.fileSelector!==undefined)throw new Error('不支持文件选择模式，请提供明确的库内笔记路径');
+      const scanMode=request.schemaVersion===3?request.scanMode:(request.schemaVersion===2?'targets':'full');
+      if(!['visible','full','targets'].includes(scanMode))throw new Error('无效 scanMode');
+      if(request.schemaVersion===3 && (scanMode==='full' || (scanMode==='visible' && request.targets!==undefined) || (scanMode==='targets' && (request.localOnly!==true || !Array.isArray(request.targets)||!request.targets.length))))throw new Error('新协议仅支持 visible 或禁止全文回退的 targets');
       if(request.schemaVersion===1 && request.targets!==undefined)throw new Error('定位扫描需要 schemaVersion 2');
       if(request.schemaVersion===2 && (!Array.isArray(request.targets)||!request.targets.length))throw new Error('定位扫描需要非空 targets');
       if(!Number.isFinite(request.expiresAt) || request.expiresAt<Date.now())throw new Error('请求已过期，请重新发起');
       if(this.busy)throw new Error('已有检测正在进行，请稍后重试');
       if(typeof request.file!=='string'||request.file.startsWith('/')||request.file.split('/').includes('..'))throw new Error('目标必须是库内笔记相对路径');
       if(typeof request.expectedSourceSha256!=='string'||! /^[a-f0-9]{64}$/.test(request.expectedSourceSha256))throw new Error('缺少源文件 SHA-256 校验值');
-      const layout=request.expectedLayout;
-      if(!layout || !Number.isFinite(layout.contentWidthPx)||!Number.isFinite(layout.fontSizePx))throw new Error('缺少约定的阅读宽度和字号');
+      const layout=request.schemaVersion===3?null:request.expectedLayout;
+      if(request.schemaVersion!==3 && (!layout || !Number.isFinite(layout.contentWidthPx)||!Number.isFinite(layout.fontSizePx)))throw new Error('缺少约定的阅读宽度和字号');
       const matches=this.app.workspace.getLeavesOfType('markdown').filter(l=>l.view instanceof MarkdownView && l.view.file?.path===request.file && l.view.containerEl.getBoundingClientRect().width>0);
       if(matches.length!==1)throw new Error('请在主区域打开唯一的目标笔记，再发起检测');
       leaf=matches[0];const view=leaf.view;
       const source=await this.app.vault.read(view.file);
       const hash=require('crypto').createHash('sha256').update(source).digest('hex');
       if(hash!==request.expectedSourceSha256)throw new Error('笔记与请求版本不一致，请读取最新内容后重试');
-      if(request.schemaVersion===2)this.runtimeModule('target-scan').resolveTargets(request.targets,source,this.app.metadataCache.getFileCache(view.file)||{});
+      if(scanMode==='targets')this.runtimeModule('target-scan').resolveTargets(request.targets,source,this.app.metadataCache.getFileCache(view.file)||{});
       phase='layout';
       this.busy=true;ownsBusy=true;this.cancelled=false;
       originalState=leaf.getViewState();originalEphemeral=leaf.getEphemeralState();
@@ -403,24 +407,30 @@ module.exports=class ShortTailInspector extends Plugin {
       const sizer=root.querySelector('.markdown-preview-sizer');
       const actualWidth=sizer?.getBoundingClientRect().width;
       const actualFont=parseFloat(root.ownerDocument.defaultView.getComputedStyle(root).fontSize);
-      if(!Number.isFinite(actualWidth)||Math.abs(actualWidth-layout.contentWidthPx)>0.5||Math.abs(actualFont-layout.fontSizePx)>0.1)throw new Error(`布局不符合约定：内容区 ${round(actualWidth||0)}px，字号 ${round(actualFont)}px`);
+      if(!Number.isFinite(actualWidth)||actualWidth<=0||!Number.isFinite(actualFont)||actualFont<=0 || (layout && (Math.abs(actualWidth-layout.contentWidthPx)>0.5||Math.abs(actualFont-layout.fontSizePx)>0.1)))throw new Error(`布局不符合约定：内容区 ${round(actualWidth||0)}px，字号 ${round(actualFont)}px`);
       phase='scan';
-      const report=request.schemaVersion===2
-        ?await this.runtimeModule('target-scan').scanTargets(target,this,request.targets,source,{sectionFor,elementPath,SELECTOR,settleLayout,refreshReading,inspect})
-        :await inspect(target,this,true);
-      if(report.sourceSha256!==request.expectedSourceSha256)throw new Error('检测期间源文件版本变化');
+      const hooks={sectionFor,elementPath,SELECTOR,settleLayout,refreshReading,inspect};
+      const report=scanMode==='visible'
+        ?await this.runtimeModule('target-scan').scanVisible(target,this,source,hooks)
+        :scanMode==='targets'
+          ?await this.runtimeModule('target-scan').scanTargets(target,this,request.targets,source,hooks,{localOnly:request.localOnly===true})
+          :await inspect(target,this,true);
+      if(report.sourceSha256!==request.expectedSourceSha256 || await this.app.vault.read(target.file)!==source)throw new Error('检测期间源文件版本变化');
       const finalRoot=target.containerEl.querySelector('.markdown-preview-view');
       const finalWidth=finalRoot?.querySelector('.markdown-preview-sizer')?.getBoundingClientRect().width;
       const finalFont=finalRoot?parseFloat(finalRoot.ownerDocument.defaultView.getComputedStyle(finalRoot).fontSize):NaN;
       if(!Number.isFinite(finalWidth)||!Number.isFinite(finalFont)||Math.abs(finalWidth-actualWidth)>0.5||Math.abs(finalFont-actualFont)>0.1)throw new Error('检测期间正文宽度或字号发生变化，结果未导出');
-      report.requestId=request.id;report.layout={contentWidthPx:round(actualWidth),fontSizePx:round(actualFont),sidebarsClosed:true};
+      report.requestId=request.id;
+      if(request.schemaVersion===3){report.schemaVersion=4;report.scanMode=scanMode;report.localOnly=request.localOnly===true;}
+      report.layout={contentWidthPx:round(actualWidth),fontSizePx:round(actualFont),sidebarsClosed:true};
       completedReport=report;
       phase='save';
       const saved=await this.save(report);
-      const complete=report.targeting?report.targeting.coverage==='complete':report.scan.complete;
-      response={id:request.id,status:complete?'complete':'incomplete',reportPath:`${dir}/report.json`,archivePath:saved.report.archivePath,sourceSha256:report.sourceSha256,blocks:report.blocks.length,suspected:report.blocks.filter(b=>b.suspected).length,skipped:report.skipped.length,cleanup:saved.cleanup};
-      if(report.targeting)Object.assign(response,{schemaVersion:2,completionScope:'targets',scanMethod:report.targeting.scanMethod,documentCoverage:report.documentCoverage,targetCoverage:report.targeting.coverage,targetResult:report.targeting.result,targets:report.targeting.targets});
-    } catch(error) {if(request?.id)response={id:request.id,status:'error',error:error.message,errorPhase:phase,scanSucceeded:!!completedReport,...(request.schemaVersion===2?{schemaVersion:2,targetResult:'failed',scanTargetResult:completedReport?.targeting?.result}:{})};}
+      const complete=scanMode==='visible'?report.visibleCoverage==='complete':report.targeting?report.targeting.coverage==='complete':report.scan.complete;
+      response={id:request.id,status:complete?'complete':'incomplete',reportPath:`${dir}/report.json`,archivePath:saved.report.archivePath,sourceSha256:report.sourceSha256,blocks:report.blocks.length,suspected:report.blocks.filter(b=>b.suspected && (scanMode!=='visible' || b.capture?.coverage==='complete')).length,skipped:report.skipped.length,cleanup:saved.cleanup};
+      if(request.schemaVersion===3)Object.assign(response,{schemaVersion:3,file:request.file,scanMode,localOnly:request.localOnly===true,completionScope:scanMode==='visible'?'viewport':'targets',scanMethod:'visible',documentCoverage:'not-scanned',...(scanMode==='visible'?{visibleCoverage:report.visibleCoverage}:{})});
+      if(report.targeting)Object.assign(response,{schemaVersion:request.schemaVersion,completionScope:'targets',scanMethod:report.targeting.scanMethod,documentCoverage:report.documentCoverage,targetCoverage:report.targeting.coverage,targetResult:report.targeting.result,targets:report.targeting.targets});
+    } catch(error) {if(request?.id)response={id:request.id,status:'error',error:error.message,errorPhase:phase,scanSucceeded:!!completedReport,...((request.schemaVersion===2 || request.schemaVersion===3 && request.scanMode==='targets')?{schemaVersion:request.schemaVersion,targetResult:'failed',scanTargetResult:completedReport?.targeting?.result}:{})};}
     finally {
       try{
         const restorationErrors=[];
@@ -433,7 +443,8 @@ module.exports=class ShortTailInspector extends Plugin {
             await settleLayout(root);leaf.view.previewMode.applyScroll(originalReadingScroll);await settle(root);
           }
         }catch(e){restorationErrors.push(e.message);}}
-        if(response && restorationErrors.length){response={...response,status:'error',errorPhase:response.errorPhase||'restore',error:response.error||'阅读布局恢复未完成',restorationErrors};if(request.schemaVersion===2){response.scanTargetResult=completedReport?.targeting?.result??response.scanTargetResult;response.targetResult='failed';}}
+        if(response && restorationErrors.length){response={...response,status:'error',errorPhase:response.errorPhase||'restore',error:response.error||'阅读布局恢复未完成',restorationErrors};if(request.schemaVersion===2 || request.schemaVersion===3 && request.scanMode==='targets'){response.scanTargetResult=completedReport?.targeting?.result??response.scanTargetResult;response.targetResult='failed';}}
+        if(response && request.schemaVersion===3)Object.assign(response,{schemaVersion:3,file:request.file,sourceSha256:request.expectedSourceSha256,scanMode:request.scanMode,localOnly:request.localOnly===true});
         if(response)await adapter.write(`${dir}/response.json`,JSON.stringify({...response,completedAt:new Date().toISOString()},null,2));
       }finally{if(ownsBusy)this.busy=false;this.polling=false;}
     }
