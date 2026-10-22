@@ -1,5 +1,5 @@
 const {Plugin, MarkdownView, Modal, Notice} = require('obsidian');
-const VERSION='0.2.3', THRESHOLD=0.25;
+const VERSION='0.2.4', THRESHOLD=0.25;
 const round=n=>Math.round(n*10)/10;
 const SELECTOR='h1,h2,h3,h4,h5,h6,p,pre,li';
 class LayoutContexts {

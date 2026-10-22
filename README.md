@@ -96,6 +96,7 @@ python3 -B "<vault>/.obsidian/plugins/short-tail-inspector/scan-note.py" "目录
 常用回归入口：
 
 ```bash
+node tests/version-consistency.cjs
 node tests/regression.cjs
 node tests/codeblock-skip.cjs
 node tests/source-mapping.cjs
