@@ -1,12 +1,17 @@
-# 短尾行检测原型 v0.2.5（可信源码映射修复）
+# 短尾行检测原型 v0.2.5.1（列表项完整性与编辑边界）
+
+## v0.2.5.1 修复
+
+- 增加普通平铺列表项的逐项完整性测量和疑似结果；只对每项单行、顺序与渲染文字可唯一对应的普通文本及单反引号行内代码提供精确 `capture.editTarget`，编辑边界仅覆盖该列表项，不扩展到兄弟项。
+- 对嵌套/任务列表、续行、块级子内容、隐藏或裁切文本、未知生成标记及布局歧义保持拒绝；列表项或兄弟项测量不完整时，视口覆盖返回 `uncovered`。
+- 识别 Obsidian 默认空列表标记装饰的受限安全形态；增加最多 24 条、字段限长且隐藏 URL/正文的 LI 拒绝诊断。Python 调用端同步核对列表项源码、DOM 顺序、测量结果及编辑目标，旧报告不会自动获得列表编辑资格。
+- 更新 `CODEX-WORKFLOW.md`、回归用例及开发验证清单。浏览器/API 替身测试与离线报告验证不替代真实 Obsidian 运行验收。
 
 ## v0.2.5 修复
 
 - 目标和视口覆盖核验复用统一的实时源码映射校验，绑定当前文件及阅读视图根节点，并沿可信祖先查找映射；陈旧或缺失的注册缓存版本不再单独否决有效的实时映射。
 - 保留多 owner、源码版本不符和范围歧义的覆盖拒绝；覆盖缺口报告 `mappingDecision`，记录接受/拒绝原因、依据、owner DOM 路径及候选失败原因，不保存 DOM 对象。
 - 扩充回归用例，覆盖 Callout、段落、目标扫描及可见扫描中的实时映射恢复和歧义拒绝。合成测试不代替真实 Obsidian 验证。
-
-## v0.2.4 范围
 
 读取 Obsidian 阅读视图实际渲染的字符位置，判断疑似短尾并返回精确源码位置，供 Codex Panel 检查和修改。插件不改写笔记、不调整 CSS、不截图、不联网。
 
@@ -50,9 +55,13 @@ python3 -B "<vault>/.obsidian/plugins/short-tail-inspector/scan-note.py" \
 
 显式路径接口使用请求 schemaVersion 3，`scanMode=visible`；响应 schemaVersion 3、归档 schemaVersion 4，`completionScope=viewport`、`scanMethod=visible`、`documentCoverage=not-scanned`。`visibleCoverage=complete` 只表示本次捕捉源区块核对完整，不代表全文通过。边界裁切、未知映射、未支持表格等实质内容或测量不完整返回 `incomplete/uncovered`，异常返回 `error`，均不回退全文。收栏可能改变换行，捕捉范围以收栏后布局为准。
 
-报告保留实测 `layout`、`capturedTargets`（含精确源码原文及行范围）和逐块 `capture`。本轮请求身份、源码哈希和归档校验通过后，即使 `status=incomplete`、`visibleCoverage=uncovered`，也须读取归档中的逐块结果：`capture.coverage=complete` 且 `suspected=true` 是可展示的局部疑似项，附源码行号和 DOM 路径。响应 `suspected` 仅统计这些已确认的局部疑似项；原始测量块中的疑似标记可保留为诊断，未覆盖块不能算作有效结果。只有块原有 `capture.eligibleForEdit=true` 时才可继续核对修改；展示结果不构成修改授权。当前候选限定能够唯一对应独立 Markdown 段落的疑似项：已有映射范围须恰好等于唯一的 `paragraph` 源区块、只关联一个测量节点，且该 P 节点不在引用、Callout 或列表内。完整 P 测量不等于独立源码段落；这些容器中的段落保留原测量和映射，但 `eligibleForEdit=false`。`capture.editReasons` 说明拒绝原因，可编辑性拒绝不改变扫描覆盖结论。
+报告保留实测 `layout`、`capturedTargets`（含精确源码原文及行范围）和逐块 `capture`。本轮请求身份、源码哈希和归档校验通过后，即使 `status=incomplete`、`visibleCoverage=uncovered`，也须读取归档中的逐块结果：`capture.coverage=complete` 且 `suspected=true` 是可展示的局部疑似项，附源码行号和 DOM 路径。响应 `suspected` 仅统计这些已确认的局部疑似项；原始测量块中的疑似标记可保留为诊断，未覆盖块不能算作有效结果。只有块原有 `capture.eligibleForEdit=true` 时才可继续核对修改；展示结果不构成修改授权。正文段落候选仍限定能够唯一对应独立 Markdown 段落的疑似项：已有映射范围须恰好等于唯一的 `paragraph` 源区块、只关联一个测量节点，且该 P 节点不在引用、Callout 或列表内。完整 P 测量不等于独立源码段落；这些容器中的段落保留原测量和映射，但 `eligibleForEdit=false`。`capture.editReasons` 说明拒绝原因，可编辑性拒绝不改变扫描覆盖结论。
+
+普通平铺紧凑列表项保留逐块展示核验：`list-item-text.complete=true`、所属源列表覆盖完整且当前 LI 与测量记录唯一对应时，可计入已确认疑似。完整测量且源码每项恰占一行的普通平铺列表，可在逐项顺序、数量及渲染文字一致且无重复文字时进入编辑候选；先支持普通文本和单反引号行内代码，不支持其他行内 Markdown、HTML、续行、任务或嵌套列表。块原有源码行范围仍指整个列表，`capture.editTarget` 单独提供可修改项的 `kind=list-item`、精确 `startLine/endLine`、带列表标记的源码 `text` 及零起始 `itemIndex`。不得按块原有范围替换整个列表；定位失败仍可展示完整检测结果，但不授予编辑资格。2026-10-26 已将本次列表编辑资格补丁部署到正式安装目录，仅更新 `target-scan.js` 与 `scan-note.py`，文件与开发源码一致；运行进程加载情况及新的真实 Obsidian 验收仍待确认。嵌套或任务列表、主动换行、块级子内容、未知生成标记、隐藏或裁切等情况不新增 LI 确认能力；松散列表保留已有 P 测量规则。Obsidian 普通列表的直接空 `span.list-bullet` 只有在无后代/控件、伪元素仅为空白或零宽占位、装饰绘制边界不与正文矩形重叠时，才豁免其布局和透明色检查。LI 自身的相对定位不再单独拒绝，正文几何、隐藏和裁切检查保留；原生标记仅新增认可已核对默认 CSS 所用的空白/`U+200B` 字符串，不放行其他未知标记。这是条件式兼容，不代表当前真实视口已经验收。列表整体覆盖通过不能替代单项完整性证明；可见 LI 测量不完整时，整体视口返回 `uncovered` 并记录原因。
 
 `visibleCoverage=uncovered` 时必须同时报告未检测内容，不能断言视口无其他寡行；零个已确认疑似项也不等于完整的“无寡行”。CLI 此时仍退出 1，但在身份校验通过后输出有效的 request/response 和 archivePath，调用方不得因非零退出码直接丢弃局部结果。error、超时、身份或源码校验失败才停止消费结果，且不得全文回退。
+
+Python 调用端按 `paragraph` 与 `list-item-text` 分别验收完整结果。列表结果还要求所属源列表覆盖完整、无映射缺口、测量数量与同范围节点一致、所有兄弟项完整；列表编辑候选还须逐项核对源码、DOM 路径顺序与文字，并验证 `capture.editTarget` 的精确范围和原文。旧归档没有此目标时不得自行提升编辑资格。2026-10-26 此前仅部署过列表检测验收修复，并用已有归档通过离线验收；本次编辑资格改动也已部署，尚未进行新的真实 Obsidian 扫描。`tests/scan-note-test.py` 包含完整列表与列表旁表格的 CLI 验收，以及不完整项、映射错误、错误源范围、兄弟项缺失和编辑资格伪报等拒绝用例；`tests/visible-partial.cjs` 还将浏览器实际产生的合成报告交给 Python 校验，防止两端验收规则不一致。这些离线测试不代表新的真实 Obsidian 验收。
 
 受保护代码块留在 `skipped`，带原有源码范围、映射身份及 `coverage=excluded`，不因代码文本未测量而造成视口失败；不可信的代码映射不能被排除。表格和其他测量失败项标记 `coverage=uncovered`。只有排除内容的视口可以完成覆盖核对，但没有正文测量结论；不得称为代码已检测通过。
 
@@ -97,6 +106,8 @@ python3 -B "<vault>/.obsidian/plugins/short-tail-inspector/scan-note.py" "目录
 
 短尾比例 25% 是筛查阈值，不是排版规范。列表、代码、Callout、主题和 Obsidian DOM 的组合仍需根据具体报告判断。合成浏览器与 API 替身测试不能代替真实 Obsidian 验证。
 
+LI 完整性失败附带 `measurementUnit.diagnostics`：每项最多 24 条拒绝记录，包含规则、节点标签、相对 LI 的 `domPath`（祖先用 `ancestor:N`）、class 和相关计算样式。路径最多 160 字符，class 最多 120 字符，样式值最多 128 字符；截断以 `truncated=true` 标记。伪元素和自定义标记文字仅记类别，样式及 class 中的 URL 被隐藏，不记录正文、HTML 或 DOM 对象。诊断不参与任何判定；开发测试可用 `paragraphUnit(el, text, {diagnostics:false})` 关闭附加字段以核对结果一致，不新增用户设置。诊断功能已有 requestId `027a505e93444c0da0350de8499b9af2` 的真实运行证据。2026-10-26 只读核验确认列表装饰兼容源码与安装副本一致；后续归档 `e548a3f2658f4aa3945d6cdecdeeba94` 中 5 个 LI 均完整测量、保留 1 条局部疑似，整体视口仍因表格等未覆盖。这不证明任意列表或当前运行进程均已验收。
+
 ## 开发与验证
 
 仓库根目录是权威开发源码；`<vault>/.obsidian/plugins/short-tail-inspector/` 是运行副本。更新关系为开发源码 → 验证后安装副本 → Obsidian 加载。没有自动构建或部署流程；部署需单独授权，并须保护插件运行数据。
@@ -121,6 +132,7 @@ python3 -B tests/paragraph-workflow-test.py
 python3 -B tests/visible-workflow-test.py
 node tests/mode-editability.cjs
 node tests/visible-partial.cjs
+node tests/li-diagnostics.cjs
 ```
 
 浏览器测试需要可解析的 Playwright 与 Chromium；可通过 `PLAYWRIGHT_MODULE` 和 `CHROME_EXECUTABLE` 指定已有依赖。测试替身不证明真实 Obsidian 布局、刷新、文件同步或侧栏恢复。

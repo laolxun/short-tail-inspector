@@ -21,9 +21,9 @@
 
 ## 核对并只改本轮目标
 
-1. 只考虑身份校验通过的本轮归档中 `capture.coverage=complete`、`suspected=true` 且 `capture.eligibleForEdit=true` 的完整段落，结合 capturedTargets 的完整范围与原文、块 key/domPath/sourceMapping、measurementUnit 及测量几何核对身份。检查 `capture.editReasons`：只有已有源码映射范围恰好等于唯一 `paragraph` 区块、仅关联一个测量节点且 P 不在引用、Callout 或列表内，才可能可编辑。该判断不产生新行号、不按文本重新定位；同文的两个独立段落仍按各自原有范围区分。保护代码块；无法把渲染段落唯一对应到可独立修改的源码时跳过，尤其不能直接替换拥有多个段落的整个引用、列表或 Callout 容器。
+1. 只考虑身份校验通过的本轮归档中 `capture.coverage=complete`、`suspected=true`、`capture.eligibleForEdit=true` 且 `editReasons=[]` 的目标，结合 capturedTargets 原文、块 key/domPath/sourceMapping、measurementUnit 及测量几何核对身份。独立正文段落仍按原有唯一 paragraph 范围及单节点规则处理。普通列表项须另有 `capture.editTarget.kind=list-item`，使用其中的精确 `startLine/endLine`、源码 `text` 及零起始 `itemIndex`，不能使用块原有的整个列表范围写入。只支持每项占一行源码的普通平铺文本与单反引号行内代码；数量、顺序、文字不一致、重复文字或结构复杂时拒绝。旧报告无 editTarget 时不得自行提升列表编辑资格。代码、引用及 Callout 的保护规则保留。
 2. 重新读取笔记原始字节，确认 SHA-256 与本轮捕捉一致，并逐字核对源码起止行及原文。DOM 文本可能已经去掉 Markdown 标记，不能直接当作源码替换内容。哈希变化时重新核对所有目标及其上下文；无法可靠证明仍是原目标则跳过，不搜索首个同名段落代替。
-3. 在用户授权的目标集合内生成优化文本，精简冗余并保留原意与 Markdown 结构。每项记录捕捉身份、原始范围、原文和拟修改文本；未捕捉段落、范围外文字和代码不得改动。
+3. 在用户授权的目标集合内生成优化文本，精简冗余并保留原意与 Markdown 结构。列表项只修改 editTarget 指定的那一行，保留列表标记、缩进和行内代码，不合并、拆分或改动兄弟项。每项记录捕捉身份、原始范围、原文和拟修改文本；未捕捉段落、范围外文字和代码不得改动。
 4. 多目标在同一已核对的源码快照上按起始行倒序修改，拒绝重叠目标。先在内存形成拟写结果并检查差异只包含已授权目标；落盘前再次核对整个文件哈希。若有外部变化，停止写入并重新核对，不能用旧缓冲覆盖。
 5. 写入后重读文件并核对实际内容。根据每个目标新增/减少行数，按源码顺序累计行偏移，生成修改后的精确范围及完整源码原文；逐项核对实际切片。不可靠的位置跳过并报告。不得沿用旧行号或用旧哈希复检。
 
@@ -43,6 +43,8 @@ python3 -B "<vault>/.obsidian/plugins/short-tail-inspector/scan-note.py" "目录
 也可使用 `--lines "12:13"`，脚本从当前源码自动绑定原文。`--local-only` 要求显式行目标和哈希，拒绝仅段落文本搜索。`--target` 可重复，但多目标不能同时完整可见时会未覆盖；不会自动拆分请求或启动全文循环。
 
 插件复用已有同步刷新与单目标可信定位；可进行一次定位滚动以使目标完整可见，然后只进行一次视口测量并筛选目标。无法定位时仍只测量一次当前视口并返回 uncovered，异常直接失败。请求是 `scanMode=targets`、`localOnly=true`；响应必须是 `completionScope=targets`、`scanMethod=visible`、`documentCoverage=not-scanned`。归档 targeting 的 requested、ranges、覆盖证据、计数和结果必须与本轮请求响应一致。完整局部复检也不会声明全文通过。
+
+列表项修改后，按最新源码绑定所属完整列表的行范围及原文进行 `--local-only` 复检，因为现有目标覆盖按源列表计算；检查该项的短尾结果，并核对兄弟项源码未改。复检整个列表不授权修改整个列表，也不代表整个视口通过。
 
 严格选择复杂源码容器内的一个完整 P 节点时，可以继续使用原有 `--select-paragraph` 配合精确容器原文、哈希及 `--include-request`，但修改边界仍须独立核对；无法证明时跳过。
 

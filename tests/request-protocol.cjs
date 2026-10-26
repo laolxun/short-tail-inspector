@@ -223,3 +223,14 @@ test('visible incomplete response counts confirmed suspects and preserves diagno
   assert.equal(archived.blocks[0].capture.eligibleForEdit,true);assert.equal(f.calls.saves,1);
   assert.deepEqual(f.calls.inspect,[]);assert.equal(f.root.scrollTop,55);
 });
+
+test('visible response counts confirmed LI even when list editing is denied',async()=>{
+  const f=fixture({version:3});let archived;
+  f.plugin.runtimeModule=()=>({scanVisible:async()=>({file:f.request.file,sourceSha256:f.request.expectedSourceSha256,
+    scan:{full:false,complete:false,steps:1},visibleCoverage:'complete',documentCoverage:'not-scanned',
+    blocks:Array.from({length:5},(_,i)=>({key:'list:'+i,suspected:i===4,measurementUnit:{type:'list-item-text',complete:true,reasons:[]},capture:{coverage:'complete',eligibleForEdit:false}})),skipped:[]})});
+  const save=f.plugin.save;f.plugin.save=async r=>{archived=r;return save(r);};
+  await f.plugin.pollRequest();
+  assert.equal(f.response().status,'complete');assert.equal(f.response().suspected,1);
+  assert.equal(f.response().blocks,5);assert.ok(archived.blocks.every(b=>!b.capture.eligibleForEdit));
+});

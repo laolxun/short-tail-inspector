@@ -82,6 +82,37 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE || 'playwright');
       f.contexts.set(child,{ctx:{sourcePath:f.file.path,getSectionInfo:()=>info},info});
       f.cache.sections.push({type:'callout',position:{start:{line:2},end:{line:3}}});
       r=await run(f);assert(r.targeting.coverage==='complete' && r.blocks.length===2 && r.blocks.every(b=>b.measurementUnit.complete),'preciseNestedCalloutContextsPermitIndependentUnits');
+      for(const [name,html,css,complete] of [
+        ['plain','<ul><li>正文</li></ul>','',true],
+        ['relativeLi','<ul><li style="position:relative">正文</li></ul>','',true],
+        ['transformedLi','<ul><li style="transform:translateX(1px)">正文</li></ul>','',false],
+        ['emptyMarker','<ul style="list-style-type: &quot;\u200b&quot;"><li>正文</li></ul>','',true],
+        ['inline','<ol><li><strong>正文</strong><code>代码</code></li></ol>','',true],
+        ['hidden','<ul><li>正文<span style="display:none">遗漏</span></li></ul>','',false],
+        ['visibility','<ul><li>正文<span style="visibility:hidden">遗漏</span></li></ul>','',false],
+        ['opacity','<ul><li style="opacity:0">正文</li></ul>','',false],
+        ['transparent','<ul><li style="color:transparent">正文</li></ul>','',false],
+        ['clip','<ul><li>正文<span style="display:inline-block;width:1px;overflow:hidden">遗漏文字</span></li></ul>','',false],
+        ['nested','<ul><li>正文<ul><li>嵌套</li></ul></li></ul>','',false],
+        ['nestedChild','<ul><li>外层<ul><li class="probe">正文</li></ul></li></ul>','',false],
+        ['loose','<ul><li><p>正文</p></li></ul>','',false],
+        ['br','<ul><li>正文<br>下行</li></ul>','',false],
+        ['task','<ul><li><input type="checkbox">正文</li></ul>','',false],
+        ['button','<ul><li>正文<button>遗漏</button></li></ul>','',false],
+        ['callout','<ul><li>正文<div class="callout">遗漏</div></li></ul>','',false],
+        ['pre','<ul><li>正文<pre>代码</pre></li></ul>','',false],
+        ['embed','<ul><li>正文<span class="markdown-embed">遗漏</span></li></ul>','',false],
+        ['pseudo','<ul><li>正文</li></ul>','.probe::after{content:"遗漏"}',false],
+        ['marker','<ul><li>正文</li></ul>','.probe::marker{content:"遗漏"}',false],
+        ['limit','<ul><li>'+ '长'.repeat(12001)+'</li></ul>','',false]
+      ]){
+        f=fixture('- 正文',html,'list');const li=f.owner.querySelector('.probe')||f.owner.querySelector('li');li.classList.add('probe');
+        const style=document.createElement('style');style.textContent=css;f.owner.append(style);
+        const unit=window.scanner.paragraphUnit(li);
+        assert(unit.type==='list-item-text' && unit.complete===complete && (complete||unit.reasons.length),'listUnit_'+name);
+      }
+      f=fixture('- 正文','<ul><li>正文</li></ul>','list');
+      assert(!window.scanner.paragraphUnit(f.owner.querySelector('li'),'仅片段').complete,'listUnitTextMustMatch');
       return checks;
     });
     console.log(JSON.stringify({passed:checks.length,checks},null,2));

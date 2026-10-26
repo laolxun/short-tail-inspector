@@ -586,6 +586,49 @@ async function scanTargets(view, plugin, input, source, hooks, options = {}) {
 
 // One measurement pass at the settled viewport. Coverage is limited to captured
 // source containers; boundary clipping and unknown visible content fail closed.
+// Narrow edit mapping: one physical source line per ordinary flat item, plain
+// text and single-backtick inline code only. Never search for matching text.
+function simpleListSource(source, start, end) {
+  const rows=source.split('\n').slice(start-1,end),items=[];let shape=null;
+  for(let i=0;i<rows.length;i++){
+    const text=rows[i],m=text.replace(/\r$/,'').match(/^( {0,3})([-+*]|[0-9]{1,9}[.)]) +(.+)$/);
+    if(!m || / {2}$/.test(m[3]))return null;
+    const kind=/^[0-9]/.test(m[2])?'OL':'UL',key=m[1]+(kind==='OL'?m[2].slice(-1):m[2]);
+    if(shape!==null&&shape!==key)return null;shape=key;
+    const parts=m[3].split('`');
+    if(parts.length%2!==1 || parts.some((part,j)=>j%2===0?/[\\*_~\[\]<>!&]/.test(part):!part))return null;
+    const rendered=normalizedText(parts.map((part,j)=>j%2 && /^ .* $/.test(part) && part.trim()?part.slice(1,-1):part).join(''));
+    if(!rendered)return null;
+    items.push({kind:'list-item',startLine:start+i,endLine:start+i,text,itemIndex:i,rendered,listTag:kind});
+  }
+  if(new Set(items.map(item=>item.rendered)).size!==items.length)return null;
+  return items.length?items:null;
+}
+function listEditTarget(block, group, blocks, source) {
+  const items=simpleListSource(source,block.sourceStartLine,block.sourceEndLine);
+  const list=block.renderNode.parentElement;
+  if(!items || list.tagName!==items[0].listTag || list.children.length!==items.length ||
+      list.closest('li,blockquote,.callout,.markdown-embed'))return null;
+  const nodes=[...list.children],siblings=blocks.filter(b=>b.sourceStartLine===block.sourceStartLine&&b.sourceEndLine===block.sourceEndLine);
+  if(siblings.length!==items.length || group.nodes.size!==items.length)return null;
+  for(let i=0;i<nodes.length;i++){
+    const node=nodes[i],records=siblings.filter(b=>b.renderNode===node);
+    if(node.tagName!=='LI' || records.length!==1 || normalizedText(records[0].text)!==items[i].rendered ||
+        records[0].sourceMapping?.status!=='mapped' || records[0].measurementUnit?.complete!==true ||
+        group.nodes.get(records[0].key)!==node)return null;
+    // Do not infer Markdown semantics for links/emphasis/HTML or wrappers.
+    for(const child of node.childNodes){
+      if(child.nodeType===3)continue;
+      if(child.nodeType!==1)return null;
+      if(child.matches('span.list-bullet')&&!child.childNodes.length)continue; // measured decoration proof already passed
+      if(child.tagName!=='CODE' || [...child.childNodes].some(n=>n.nodeType!==3))return null;
+    }
+  }
+  const item=items[nodes.indexOf(block.renderNode)];
+  const {rendered,listTag,...target}=item;
+  return target;
+}
+
 async function scanVisible(view, plugin, source, hooks) {
   if(view.previewMode.get()!==source)throw new Error('阅读视图尚未同步最新文件');
   let tracker,unmeasuredVisibleText=false;
@@ -626,6 +669,7 @@ async function scanVisible(view, plugin, source, hooks) {
   if([...tracker.mappingGaps.values()].length)reasons.push('可见内容存在未知或未支持的源码映射');
   if(report.scan.missingSourceLocations)reasons.push('测量块缺少源码位置');
   if(report.blocks.some(b=>b.measurementUnit?.type==='paragraph' && (b.measurementUnit.complete!==true || b.measurementUnit.reasons?.length!==0)))reasons.push('段落测量完整性无法确认');
+  if(report.blocks.some(b=>b.measurementUnit?.type==='list-item-text' && (b.measurementUnit.complete!==true || b.measurementUnit.reasons?.length!==0)))reasons.push('列表项测量完整性无法确认');
   const skipped=report.skipped.map(item=>({...item,coverage:excludedKeys.has(item.key)?'excluded':'uncovered'}));
   if(skipped.some(item=>item.coverage==='uncovered' && item.kind==='表格'))reasons.push('视口存在未覆盖的表格（未支持测量）');
   if(skipped.some(item=>item.coverage==='uncovered' && item.kind!=='表格'))reasons.push('当前视口存在未完整测量或映射不可信的内容');
@@ -665,6 +709,29 @@ async function scanVisible(view, plugin, source, hooks) {
       expected[0].type==='paragraph' && expected[0].startLine===block.sourceStartLine && expected[0].endLine===block.sourceEndLine &&
       node?.tagName==='P' && !node.closest('blockquote,.callout,.callout-content,.callout-title,li,ul,ol') &&
       fullyVisible(node,tracker.root) && tracker.reasons(matches[0],tracker.groups,true,ownGaps).length===0;
+    // A list may legitimately own many LI nodes. Match this exact node/key,
+    // retain complete source-list coverage before considering an item edit.
+    const listMeasured=matches.length===1 && matches[0].coverage==='complete' &&
+      expected.length===1 && expected[0].type==='list' &&
+      expected[0].startLine===block.sourceStartLine && expected[0].endLine===block.sourceEndLine &&
+      block.sourceMapping?.status==='mapped' && block.measurementUnit?.type==='list-item-text' &&
+      block.measurementUnit.complete===true && block.measurementUnit.reasons?.length===0 &&
+      !block.protectedContent && node?.tagName==='LI' && fullyVisible(node,tracker.root) &&
+      group?.owners.size===1 && group.nodes.get(block.key)===node && tracker.measured.has(block.key) &&
+      !tracker.failed.has(block.key) && report.blocks.filter(b=>b.key===block.key).length===1 &&
+      [...group.nodes.values()].filter(n=>n===node).length===1 &&
+      [...group.nodes].every(([key,n])=>report.blocks.some(b=>b.key===key && b.renderNode===n &&
+        b.measurementUnit?.type==='list-item-text' && b.measurementUnit.complete===true &&
+        b.measurementUnit.reasons?.length===0));
+    if(block.measurementUnit?.type==='list-item-text'){
+      const editTarget=listMeasured?listEditTarget(block,group,report.blocks,source):null;
+      const listReasons=[];
+      if(!listMeasured)listReasons.push('缺少完整列表项测量或可信源列表覆盖');
+      else if(!editTarget)listReasons.push('列表项无法唯一对应受支持的单行源码（仅普通平铺文本及行内代码）');
+      if(!block.suspected)listReasons.push('未标为疑似短尾');
+      return {...block,capture:{coverage:listMeasured?'complete':'uncovered',eligibleForEdit:listReasons.length===0,
+        editReasons:listReasons,...(listReasons.length===0?{editTarget}: {})}};
+    }
     return {...block,capture:{coverage:measured || locallyMeasured?'complete':'uncovered',eligibleForEdit:editReasons.length===0,editReasons}};
   });
   return {...report,schemaVersion:4,scanMode:'visible',documentCoverage:'not-scanned',completionScope:'viewport',

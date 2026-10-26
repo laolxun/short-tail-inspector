@@ -23,7 +23,14 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
         ['callout', '> [!K]\n> '+text, `<div class="callout"><div class="callout-title">K</div><div class="callout-content"><p>${text}</p></div></div>`, 'callout', false],
         ['two-quote-paragraphs', '> '+text+'\n>\n> '+text, `<blockquote><p>${text}</p><p>${text}</p></blockquote>`, 'blockquote', false],
         ['two-callout-paragraphs', '> [!K]\n> '+text+'\n>\n> '+text, `<div class="callout"><div class="callout-title">K</div><div class="callout-content"><p>${text}</p><p>${text}</p></div></div>`, 'callout', false],
-        ['tight-list', '- '+text, `<ul><li>${text}</li></ul>`, 'list', false],
+        ['tight-list', '- '+text, `<ul><li>${text}</li></ul>`, 'list', true],
+        ['list-inline-code', '- `'+text+'`', `<ul><li><code>${text}</code></li></ul>`, 'list', true],
+        ['list-ordered', '1. '+text, `<ol><li>${text}</li></ol>`, 'list', true],
+        ['list-duplicates', '- '+text+'\n- '+text, `<ul><li>${text}</li><li>${text}</li></ul>`, 'list', false],
+        ['list-reordered', '- '+text+'\n- '+text.replace('测','另'), `<ul><li>${text.replace('测','另')}</li><li>${text}</li></ul>`, 'list', false],
+        ['list-count-mismatch', '- '+text+'\n- '+text.replace('测','另'), `<ul><li>${text}</li></ul>`, 'list', false],
+        ['list-source-markup', '- **'+text+'**', `<ul><li><strong>${text}</strong></li></ul>`, 'list', false],
+        ['list-continuation', '- '+text+'\n  续行', `<ul><li>${text}</li></ul>`, 'list', false],
         ['loose-list', '- '+text+'\n\n  '+text, `<ul><li><p>${text}</p><p>${text}</p></li></ul>`, 'list', false],
         // A paragraph child label/range alone does not prove standalone ownership.
         ['nested-paragraph-metadata', '> '+text, `<blockquote><p>${text}</p></blockquote>`, 'paragraph', false],
@@ -59,7 +66,8 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
         const full=await window.scanner.inspect(view,plugin,true);
         const visible=await window.targets.scanVisible(view,plugin,source,window.scanner);
         const evidence=b=>({key:b.key,start:b.sourceStartLine,end:b.sourceEndLine,domPath:b.domPath,renderDomPath:b.renderDomPath,sourceMapping:b.sourceMapping,measurementUnit:b.measurementUnit,text:b.text,suspected:b.suspected,lines:b.lines});
-        results.push({name,expectedEditable,full:full.blocks.map(evidence),collected:collected.blocks.map(evidence),visible:visible.blocks.map(evidence),
+        results.push({name,source,report:visible,confirmed:visible.blocks.filter(b=>b.suspected&&b.capture.coverage==='complete').length,
+          expectedEditable,full:full.blocks.map(evidence),collected:collected.blocks.map(evidence),visible:visible.blocks.map(evidence),
           actualEditable:visible.blocks.map(b=>b.capture.eligibleForEdit),capture:visible.blocks.map(b=>b.capture),
           fullHasCapture:full.blocks.some(b=>'capture' in b),visibleCoverage:visible.visibleCoverage});
       }
@@ -77,14 +85,21 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
       assert.ok(r.full.every(b=>b.suspected),r.name+': fixture exercises actual suspected blocks');
       assert.ok(r.actualEditable.every(v=>v===r.expectedEditable),r.name+': independent Markdown paragraph eligibility');
       assert.ok(r.capture.every(c=>c.eligibleForEdit ? c.editReasons.length===0 : c.editReasons.length>0),r.name+': explicit eligibility evidence');
+      if(['tight-list','list-inline-code','list-ordered'].includes(r.name)){
+        assert.ok(r.capture.every(c=>c.coverage==='complete'&&c.eligibleForEdit&&c.editTarget.kind==='list-item'));
+        assert.equal(r.capture[0].editTarget.startLine,1);
+        assert.equal(r.capture[0].editTarget.endLine,1);
+      }
       if(r.name==='stale-child-recovered-by-parent'){
         assert.equal(r.full[0].sourceMapping.status,'mapped');
         assert.ok(r.full[0].sourceMapping.failures.length>0);
         assert.equal(r.visibleCoverage,'complete','trusted unique parent restores coverage without bypassing paragraph edit gates');
-      } else {
+      } else if(r.name!=='list-count-mismatch') {
         assert.equal(r.visibleCoverage,'complete',r.name+': edit rejection does not change scan coverage');
       }
     }
+    const accepted=require('node:child_process').spawnSync('python3',['-B',path.join(__dirname,'verify-visible-contract.py')],{input:JSON.stringify(results),encoding:'utf8'});
+    assert.equal(accepted.status,0,accepted.stderr);console.log(accepted.stdout);
     console.log(JSON.stringify({passed:results.length,crossModeMappingUnchanged:true}));
   } finally {await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});

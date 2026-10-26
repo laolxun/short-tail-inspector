@@ -1,11 +1,13 @@
 // Real browser geometry; synthetic source/Obsidian APIs. No note writes.
+// list-bullet CSS below reproduces installed Obsidian app.css rules: floated
+// empty span, U+200B marker/pseudos and a painted circle; runtime still verifies it.
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
 (async()=>{
   const browser=await chromium.launch({headless:true,...(process.env.CHROME_EXECUTABLE?{executablePath:process.env.CHROME_EXECUTABLE}:{})});
   try{
     const page=await browser.newPage();
-    await page.setContent('<style>body{margin:8px}p{font:16px sans-serif;width:120px;line-height:24px;margin:6px 0}pre{width:120px}td{padding:5px}</style>');
+    await page.setContent('<style>body{margin:8px}p{font:16px sans-serif;width:120px;line-height:24px;margin:6px 0}li{font:16px sans-serif;width:120px;line-height:24px;margin:6px 0}pre{width:120px}td{padding:5px}.obsidian-list li{position:relative}.obsidian-list{list-style-type:\"\\200B\"}.obsidian-list>li>.list-bullet{color:transparent;position:relative;display:inline-flex;float:left;margin-inline-start:-0.8em;justify-content:center;align-items:center}.list-bullet:before{content:\"\\200B\"}.list-bullet:after{position:absolute;content:\"\\200B\";pointer-events:none;width:5px;height:5px;border-radius:50%;background:#888}</style>');
     const scanner=fs.readFileSync(path.join(__dirname,'../main.js'),'utf8').split('class ResultModal')[0].split('\n').slice(1).join('\n');
     await page.addScriptTag({content:scanner+';window.scanner={sourceMappingFor,sectionFor,elementPath,SELECTOR,settleLayout,refreshReading,inspect,LayoutContexts};'});
     await page.addScriptTag({content:'{const module={exports:{}};'+fs.readFileSync(path.join(__dirname,'../target-scan.js'),'utf8')+';window.targets=module.exports;}'});
@@ -17,7 +19,11 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
         const container=document.createElement('div');container.id='fixture';document.body.append(container);
         const root=document.createElement('div');root.className='markdown-preview-view';root.style.cssText='width:300px;height:600px;overflow:auto';container.append(root);
         const parts=[];
-        if(!options.codeOnly)parts.push({type:'paragraph',source:options.clear?'短段落':suspect,html:`<p>${options.clear?'短段落':suspect}</p>`});
+        if(options.list){
+          const items=['短项一','短项二','短项三','短项四',suspect];
+          parts.push({type:'list',source:items.map(x=>'- '+x).join('\n'),html:'<ul'+(options.obsidian?' class="obsidian-list"':'')+'>'+items.map(x=>'<li>'+(options.obsidian?'<span class="list-bullet"></span>':'')+x+'</li>').join('')+'</ul>'});
+        }
+        if(!options.codeOnly&&!options.list)parts.push({type:'paragraph',source:options.clear?'短段落':suspect,html:`<p>${options.clear?'短段落':suspect}</p>`});
         if(options.code||options.codeOnly)parts.push({type:'code',source:'```bash\necho protected\n```',html:'<pre><code>echo protected</code></pre>'});
         if(options.table)parts.push({type:'table',source:'| 未测 |\n| --- |\n| 表格 |',html:'<table><tr><td>未测表格</td></tr></table>'});
         const source=parts.map(p=>p.source).join('\n\n'),contexts=new window.scanner.LayoutContexts(),cache={sections:[]},file={path:'fixture.md',stat:{mtime:1}};
@@ -28,6 +34,27 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
           contexts.set(owner,{ctx:{sourcePath:file.path,getSectionInfo:()=>info},info:options.cacheOnly?{...info}:info});
           cache.sections.push({type:part.type,position:{start:{line:start},end:{line:end}}});
           start=end+2;
+        }
+        if(options.decorationBad){
+          const bullet=root.querySelector('li:last-child > .list-bullet');
+          if(options.decorationBad==='text')bullet.textContent='未测正文';
+          if(options.decorationBad==='control')bullet.innerHTML='<input type="checkbox">';
+          if(options.decorationBad==='overlap')bullet.style.marginInlineStart='0px';
+          if(options.decorationBad==='outline')bullet.style.outline='20px solid red';
+          if(options.decorationBad==='image')bullet.style.backgroundImage='linear-gradient(red,blue)';
+          const pseudoBad={fixed:'position:fixed;left:0;top:0',sticky:'position:sticky',shadow:'text-shadow:20px 0 red',decoration:'text-decoration:underline',translate:'translate:20px',zoom:'zoom:2',lineheight:'height:auto;line-height:1000px',fontsize:'font-size:100px',spacing:'letter-spacing:50px',minsize:'min-width:1000px',maxsize:'max-height:1000px',motion:'offset-path:path(\"M 0 0 L 100 0\")'};
+          if(pseudoBad[options.decorationBad]){const style=document.createElement('style');style.textContent='.list-bullet:after{'+pseudoBad[options.decorationBad]+'}';root.append(style);}
+          if(options.decorationBad==='static-host'){bullet.style.position='static';const style=document.createElement('style');style.textContent='.list-bullet:after{left:0;top:0}';root.append(style);}
+          if(options.decorationBad==='ancestor-zoom')root.style.zoom='2';
+
+          if(options.decorationBad==='pseudo'){const style=document.createElement('style');style.textContent='.list-bullet:after{content:"未测正文"}';root.append(style);}
+          if(options.decorationBad==='marker')root.querySelector('ul').style.listStyleType='"未知正文"';
+        }
+        if(options.listBad){
+          const li=options.listBad==='hiddenSibling'?root.querySelector('li'):root.querySelector('li:last-child');
+          const extras={hiddenSibling:'<span style="display:none">遗漏</span>',hidden:'<span style="display:none">遗漏</span>',nested:'<ul><li>嵌套</li></ul>',task:'<input type="checkbox">',br:'<br>主动换行',loose:'<p>其他段落</p>'};
+          if(options.listBad==='clipped')li.style.cssText='height:10px;overflow:hidden';
+          else li.insertAdjacentHTML('beforeend',extras[options.listBad]);
         }
         if(options.missingCache){for(const [,record] of contexts)record.info=null;}
         if(options.staleChild){
@@ -48,8 +75,13 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
         const report=await window.targets.scanVisible(view,plugin,source,hooks);
         if(calls.length!==1||calls[0]!==false||report.scan.steps!==1||report.scan.full||writes||root.scrollTop!==0)throw Error(name+': one-pass/no-write contract');
         const confirmed=report.blocks.filter(b=>b.suspected && b.capture.coverage==='complete');
-        out.push({name,report,confirmed:confirmed.length,writes,calls});return report;
+        out.push({name,source,report,confirmed:confirmed.length,writes,calls});return report;
       }
+      await run('list-normal',{list:true});
+      await run('list-obsidian',{list:true,obsidian:true});
+      await run('list-obsidian-table',{list:true,obsidian:true,table:true});
+      for(const decorationBad of ['text','control','overlap','outline','image','pseudo','marker','fixed','sticky','shadow','decoration','translate','zoom','static-host','ancestor-zoom','lineheight','fontsize','spacing','minsize','maxsize','motion'])await run('list-decoration-'+decorationBad,{list:true,obsidian:true,decorationBad});
+      for(const listBad of ['hidden','hiddenSibling','clipped','nested','task','br','loose'])await run('list-'+listBad,{list:true,listBad});
       await run('paragraph-and-code',{code:true});
       await run('stale-cache-live-valid',{cacheOnly:true,stale:true});
       await run('missing-cache-live-valid',{cacheOnly:true,missingCache:true});
@@ -69,6 +101,26 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
     });
     for(const r of results){
       const report=r.report;
+      if(r.name.startsWith('list-')){
+        if(['list-normal','list-obsidian','list-obsidian-table'].includes(r.name)){
+          assert.ok(report.blocks.every(b=>b.capture.eligibleForEdit===b.suspected),r.name+': only trusted suspects editable');
+          const candidate=report.blocks.find(b=>b.capture.eligibleForEdit);
+          assert.deepEqual(candidate.capture.editTarget,{kind:'list-item',startLine:5,endLine:5,text:'- '+('测试'.repeat(7)+'测'),itemIndex:4});
+          assert.equal(report.visibleCoverage,r.name==='list-obsidian-table'?'uncovered':'complete');
+          assert.equal(report.blocks.length,5);
+          assert.equal(report.capturedTargets.length,r.name==='list-obsidian-table'?2:1);
+          assert.equal(report.capturedTargets[0].coverage,'complete');
+          assert.equal(r.confirmed,1,'five-item list must retain the actual short tail');
+          assert.ok(report.blocks.every(b=>b.capture.coverage==='complete'&&b.measurementUnit.complete));
+          assert.equal(new Set(report.blocks.map(b=>b.key)).size,5);
+        }else{
+          assert.ok(report.blocks.every(b=>!b.capture.eligibleForEdit),r.name+': incomplete lists never editable');
+          assert.equal(r.confirmed,0,r.name+': incomplete LI must not confirm');
+          assert.equal(report.visibleCoverage,'uncovered',r.name+': incomplete LI prevents viewport completeness');
+          if(r.name!=='list-loose')assert.ok(report.visibleReasons.includes('列表项测量完整性无法确认'));
+        }
+        continue;
+      }
       if(['paragraph-and-code','protected-code-only','stale-cache-live-valid','missing-cache-live-valid','stale-child-trusted-ancestor'].includes(r.name))assert.equal(report.visibleCoverage,'complete',r.name);
       else assert.equal(report.visibleCoverage,'uncovered',r.name);
       if(['paragraph-and-code','paragraph-and-table','paragraph-and-unknown','paragraph-code-table','stale-cache-live-valid','missing-cache-live-valid','stale-child-trusted-ancestor'].includes(r.name)){
@@ -95,6 +147,9 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
       if(r.name==='unmapped-code-is-not-exclusion')assert.ok(report.skipped.every(b=>b.coverage!=='excluded'));
       if(/hidden|stale-paragraph|clipped|failed/.test(r.name))assert.ok(report.blocks.every(b=>!b.capture.eligibleForEdit && b.capture.coverage!=='complete'));
     }
+    // Feed actual browser-produced captures to the real Python consumer too.
+    const accepted=require('node:child_process').spawnSync('python3',['-B',path.join(__dirname,'verify-visible-contract.py')],{input:JSON.stringify(results),encoding:'utf8'});
+    assert.equal(accepted.status,0,accepted.stderr);console.log(accepted.stdout);
     console.log(JSON.stringify({passed:results.length,checks:results.map(r=>({name:r.name,visibleCoverage:r.report.visibleCoverage,confirmedSuspects:r.confirmed,calls:r.calls,writes:r.writes,visibleReasons:r.report.visibleReasons}))},null,2));
   }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

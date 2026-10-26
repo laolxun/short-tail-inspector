@@ -146,6 +146,63 @@ def verify_report(response, request, root, plugin):
     return report
 
 
+def simple_list_source(source, start, end):
+    """Same narrow source shape as the producer; no text search or Markdown guessing."""
+    items, shape = [], None
+    for index, text in enumerate(source.split('\n')[start - 1:end]):
+        match = re.fullmatch(r'( {0,3})([-+*]|[0-9]{1,9}[.)]) +(.+)', text.removesuffix('\r'))
+        if not match or re.search(r' {2}$', match[3]):
+            return None
+        marker = match[2]
+        key = match[1] + (marker[-1] if marker[0].isdigit() else marker)
+        if shape is not None and shape != key:
+            return None
+        shape = key
+        parts = match[3].split('`')
+        if len(parts) % 2 != 1 or any(re.search(r'[\\*_~\[\]<>!&]', part) if j % 2 == 0 else not part
+                                            for j, part in enumerate(parts)):
+            return None
+        rendered = ' '.join(''.join(part[1:-1] if j % 2 and part.startswith(' ') and
+                                   part.endswith(' ') and part.strip() else part
+                                   for j, part in enumerate(parts)).split())
+        if not rendered:
+            return None
+        items.append(dict(kind='list-item', startLine=start + index, endLine=start + index,
+                          text=text, itemIndex=index, rendered=rendered))
+    return items if items and len({item['rendered'] for item in items}) == len(items) else None
+
+
+def verify_list_edit_target(block, siblings, source):
+    start, end = block['sourceStartLine'], block['sourceEndLine']
+    items = simple_list_source(source, start, end)
+    target = block['capture'].get('editTarget', {})
+    if not isinstance(target, dict):
+        raise SystemExit('Viewport list edit target missing')
+    index = target.get('itemIndex')
+    if (not items or type(index) is not int or not 0 <= index < len(items) or
+            type(target.get('startLine')) is not int or type(target.get('endLine')) is not int or
+            target != {k: v for k, v in items[index].items() if k != 'rendered'} or
+            block['capture'].get('editReasons') != [] or block.get('suspected') is not True):
+        raise SystemExit('Viewport list edit target identity incomplete')
+    paths = {}
+    for sibling in siblings:
+        path = sibling.get('domPath', '')
+        parent, _, suffix = path.rpartition('.')
+        if not suffix.isdigit() or int(suffix) in paths:
+            raise SystemExit('Viewport list item order ambiguous')
+        paths[int(suffix)] = (parent, sibling)
+    if set(paths) != set(range(len(items))) or len({row[0] for row in paths.values()}) != 1:
+        raise SystemExit('Viewport list item order incomplete')
+    for i, item in enumerate(items):
+        sibling = paths[i][1]
+        if (not isinstance(sibling.get('text'), str) or
+                ' '.join(sibling['text'].split()) != item['rendered'] or
+                sibling.get('measurementUnit', {}).get('text') != sibling['text']):
+            raise SystemExit('Viewport list item source/text mismatch')
+    if paths[index][1] is not block:
+        raise SystemExit('Viewport list edit target selects another item')
+
+
 def verify_scoped_identity(response, request, report, source):
     mode = request['scanMode']
     if report.get('archivePath') != response.get('archivePath'):
@@ -238,14 +295,33 @@ def verify_scoped_identity(response, request, report, source):
                     block.get('sourceMapping', {}).get('status') != 'mapped' or len(matches) != 1):
                 raise SystemExit('Viewport block identity/mapping incomplete')
             unit = block.get('measurementUnit', {})
-            if unit.get('type') == 'paragraph' and (unit.get('complete') is not True or unit.get('reasons') != []):
-                raise SystemExit('Viewport paragraph measurement incomplete')
-            if confirmed and (unit.get('type') != 'paragraph' or block.get('protectedContent') is not False or
+            if unit.get('type') in ('paragraph', 'list-item-text') and (unit.get('complete') is not True or unit.get('reasons') != []):
+                raise SystemExit('Viewport text measurement incomplete')
+            if confirmed and (unit.get('type') not in ('paragraph', 'list-item-text') or block.get('protectedContent') is not False or
                     type(block.get('lineCount')) is not int or block['lineCount'] < 1 or
                     type(block.get('availableWidthPx')) not in (int, float) or
                     not math.isfinite(block['availableWidthPx']) or block['availableWidthPx'] <= 0):
-                raise SystemExit('Confirmed viewport paragraph geometry incomplete')
-            if capture.get('eligibleForEdit') is True:
+                raise SystemExit('Confirmed viewport text geometry incomplete')
+            if unit.get('type') == 'list-item-text':
+                # A list owns several measured LI nodes, not individual source
+                # item ranges. Editing additionally needs an exact item target.
+                target = matches[0]
+                siblings = [b for b in blocks if b.get('sourceStartLine') == start and
+                            b.get('sourceEndLine') == end]
+                if (not confirmed or type(capture.get('eligibleForEdit')) is not bool or
+                        target.get('coverage') != 'complete' or target.get('resolved') is not True or
+                        target.get('reasons') != [] or target.get('mappingGaps') != [] or
+                        target.get('expected') != [{'type': 'list', 'startLine': start, 'endLine': end}] or
+                        type(target.get('measuredBlocks')) is not int or target['measuredBlocks'] != len(siblings) or
+                        any(b.get('measurementUnit', {}).get('type') != 'list-item-text' or
+                            b['measurementUnit'].get('complete') is not True or
+                            b['measurementUnit'].get('reasons') != [] or
+                            b.get('capture', {}).get('coverage') != 'complete' or
+                            type(b['capture'].get('eligibleForEdit')) is not bool for b in siblings)):
+                    raise SystemExit('Viewport list detection evidence incomplete')
+                if capture['eligibleForEdit']:
+                    verify_list_edit_target(block, siblings, source)
+            elif capture.get('eligibleForEdit') is True:
                 target = matches[0]
                 expected = target.get('expected', [])
                 if (target.get('coverage') != 'complete' or target.get('resolved') is not True or

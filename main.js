@@ -1,5 +1,5 @@
 const {Plugin, MarkdownView, Modal, Notice} = require('obsidian');
-const VERSION='0.2.5', THRESHOLD=0.25;
+const VERSION='0.2.5.1', THRESHOLD=0.25;
 const round=n=>Math.round(n*10)/10;
 const SELECTOR='h1,h2,h3,h4,h5,h6,p,pre,li';
 class LayoutContexts {
@@ -116,20 +116,129 @@ function elementPath(el,owner) {
   while(el && el!==owner){path.push(Array.from(el.parentElement?.children||[]).indexOf(el));el=el.parentElement;}
   return path.reverse().join('.');
 }
-// A source container may own several paragraphs. This evidence describes only
-// one complete P node; source identity/coverage remain the target scanner's job.
-function paragraphUnit(el, measuredText) {
+// A source container may own several measurement units. Character completeness
+// is separate from source coverage and edit eligibility.
+function paragraphUnit(el, measuredText, options={}) {
+  if(el.tagName==='LI')return listItemUnit(el,measuredText,options);
+  if(el.tagName!=='P')return {type:'code-block'};
+  return inlineTextUnit(el,measuredText,'paragraph');
+}
+// This proves only a simple flat LI's measured characters, never its source
+// item range or edit eligibility. Source-list coverage is checked separately.
+// Bounded rejection evidence only: no textContent, HTML, source, or DOM nodes.
+function liDiagnostics(el, enabled) {
+  const entries=[],seen=new Set();let truncated=false;
+  const redactURLs=value=>String(value??'').replace(/url\((?:"[^"]*"|'[^']*'|[^)]*)\)/gi,'[url omitted]').replace(/(?:https?|file|ftp|data|blob):[^\s"'<>]+/gi,'[url omitted]');
+  const cut=(value,max=128)=>{const text=String(value??'');if(text.length>max)truncated=true;return text.slice(0,max);};
+  const add=(rule,node,css={},pseudo=null)=>{
+    if(!enabled)return;
+    let domPath='';
+    if(node!==el){
+      if(el.contains(node))domPath=elementPath(node,el);
+      else{let p=el,depth=0;while(p&&p!==node&&depth<64){p=p.parentElement;depth++;}domPath=p===node?`ancestor:${depth}`:'outside-li';}
+    }
+    const values={};for(const [key,value] of Object.entries(css))values[key]=cut(redactURLs(value));
+    const entry={rule:cut(rule,64),tagName:cut(node?.tagName||'',24),domPath:cut(domPath,160),
+      className:cut(redactURLs(node?.getAttribute?.('class')||''),120),...(pseudo?{pseudo:cut(pseudo,24)}:{}),css:values};
+    const id=JSON.stringify(entry);if(seen.has(id))return;
+    if(entries.length>=24){truncated=true;return;}seen.add(id);entries.push(entry);
+  };
+  return {add,finish:()=>({entries,truncated,limit:24})};
+}
+// Installed Obsidian app.css uses U+200B markers and an empty floated SPAN
+// with a painted ::after. Class identity alone never exempts content.
+function emptyListMarker(value) {
+  return /^(?:"[\t\n\r\f \u200B]*"|'[\t\n\r\f \u200B]*')$/.test(value);
+}
+function listBulletDecoration(node, li) {
+  if(node.tagName!=='SPAN' || node.parentElement!==li || !node.classList.contains('list-bullet') ||
+      node.childNodes.length || node.matches('[role],[tabindex],[contenteditable]') ||
+      li.querySelectorAll(':scope > .list-bullet').length!==1)return false;
+  const win=li.ownerDocument.defaultView,style=win.getComputedStyle(node),box=node.getBoundingClientRect();
+  const unmodelled=s=>s.textShadow!=='none' || s.textDecorationLine!=='none' ||
+    (parseFloat(s.webkitTextStrokeWidth)||0)!==0 || s.mixBlendMode!=='normal' ||
+    (s.backdropFilter && s.backdropFilter!=='none') || (s.offsetPath && s.offsetPath!=='none') ||
+    (s.webkitBoxReflect && s.webkitBoxReflect!=='none') ||
+    ['translate','rotate','scale'].some(k=>s[k] && s[k]!=='none') ||
+    (s.zoom && !['1','normal'].includes(s.zoom));
+  if(unmodelled(style))return false;
+  // CSS pixels for pseudo sizes must share the measured viewport coordinate
+  // system. Reject ancestor scaling/rotation rather than guessing paint bounds.
+  for(let ancestor=node.parentElement;ancestor;ancestor=ancestor.parentElement){
+    const a=win.getComputedStyle(ancestor);
+    if(a.transform!=='none' || ['translate','rotate','scale'].some(k=>a[k]&&a[k]!=='none') ||
+        (a.zoom&&!['1','normal'].includes(a.zoom)))return false;
+  }
+
+  if(!['static','relative'].includes(style.position) || style.transform!=='none' || style.filter!=='none' || style.clipPath!=='none' || style.boxShadow!=='none' || style.backgroundImage!=='none' || style.borderImageSource!=='none' || (style.outlineStyle!=='none' && parseFloat(style.outlineWidth)>0))return false;
+  const paint=[{left:box.left,right:box.right,top:box.top,bottom:box.bottom}];
+  for(const pseudo of ['::before','::after']){
+    const p=win.getComputedStyle(node,pseudo);
+    if(['none','normal'].includes(p.content))continue;
+    if(!['static','relative','absolute'].includes(p.position) ||
+        (p.position==='absolute' && style.position!=='relative') || p.cssFloat!=='none' || unmodelled(p))return false;
+    // Auto sizes of zero-text pseudo boxes are supported only with inherited
+    // text metrics; reject custom sizing instead of underestimating its paint.
+    if(['fontFamily','fontSize','fontWeight','fontStyle','fontStretch','lineHeight','letterSpacing','wordSpacing'].some(k=>p[k]!==style[k]) ||
+        !['normal','0px'].includes(p.letterSpacing) || !['normal','0px'].includes(p.wordSpacing) ||
+        !['auto','0px'].includes(p.minWidth) || !['auto','0px'].includes(p.minHeight) ||
+        p.maxWidth!=='none' || p.maxHeight!=='none' || (p.height==='auto'&&!/^[\d.]+px$/.test(p.lineHeight)))return false;
+
+    if(!emptyListMarker(p.content) || p.transform!=='none' || p.filter!=='none' || p.clipPath!=='none' || p.boxShadow!=='none' || p.backgroundImage!=='none' || p.borderImageSource!=='none' || (p.outlineStyle!=='none' && parseFloat(p.outlineWidth)>0))return false;
+    // Conservatively bound painted boxes in every direction. No guessed glyph
+    // text, no DOM mutation, and no assumption that a zero-width host is unpainted.
+    let x=box.width,y=box.height+(parseFloat(p.lineHeight)||0)+(parseFloat(p.fontSize)||0);
+    for(const k of ['width','left','right','marginLeft','marginRight','paddingLeft','paddingRight','borderLeftWidth','borderRightWidth']){
+      const v=p[k];if(v==='auto'||v==='normal')continue;if(!/^-?[\d.]+px$/.test(v))return false;x+=Math.abs(parseFloat(v));
+    }
+    for(const k of ['height','top','bottom','marginTop','marginBottom','paddingTop','paddingBottom','borderTopWidth','borderBottomWidth']){
+      const v=p[k];if(v==='auto'||v==='normal')continue;if(!/^-?[\d.]+px$/.test(v))return false;y+=Math.abs(parseFloat(v));
+    }
+    if(!Number.isFinite(x)||!Number.isFinite(y))return false;
+    paint.push({left:box.left-x,right:box.right+x,top:box.top-y,bottom:box.bottom+y});
+  }
+  const walker=li.ownerDocument.createTreeWalker(li,4);let text;
+  while((text=walker.nextNode())){
+    if(!text.nodeValue.trim())continue;
+    const range=li.ownerDocument.createRange();range.selectNodeContents(text);
+    for(const r of range.getClientRects())if(r.width>0 && r.height>0 && paint.some(b=>r.left<b.right && r.right>b.left && r.top<b.bottom && r.bottom>b.top))return false;
+  }
+  return true;
+}
+function listItemUnit(el, measuredText, options={}) {
+  const diagnostics=liDiagnostics(el,options.diagnostics!==false),add=diagnostics.add;
+  const decorations=new Set([...el.querySelectorAll(':scope > .list-bullet')].filter(n=>listBulletDecoration(n,el)));
+  const unit=inlineTextUnit(el,measuredText,'list-item-text',add,decorations),reasons=[...unit.reasons];
+  const win=el.ownerDocument.defaultView;
+  if(!el.parentElement?.matches('ul,ol') || el.parentElement.closest('li,blockquote,.callout,.markdown-embed')){reasons.push('列表项不是普通平铺列表');add('flat-list',el.parentElement);}
+  const allowed=new Set(['SPAN','STRONG','EM','B','I','S','DEL','CODE','A','MARK','SMALL','SUB','SUP','U']);
+  const unsupported=[...el.querySelectorAll('*')].filter(n=>!allowed.has(n.tagName));
+  if(unsupported.length){reasons.push('列表项含未支持结构、主动换行或控件');for(const n of unsupported)add('unsupported-structure',n);}
+  if(el.matches('.task-list-item,[data-task]')){reasons.push('任务列表项未支持确认');add('task-list',el);}
+  for(const node of [el,...el.querySelectorAll('*')]){
+    if(decorations.has(node))continue;
+    const style=win.getComputedStyle(node);
+    if((style.position!=='static' && !(node===el && style.position==='relative')) || style.transform!=='none' || style.filter!=='none' || style.clipPath!=='none'){reasons.push('列表项存在未支持的定位、裁切或变换');const css={};for(const k of ['position','transform','filter','clipPath'])if(style[k]!== (k==='position'?'static':'none'))css[k]=style[k];add('position-transform',node,css);}
+    const transparent=c=>c==='transparent' || /^rgba\(.*,[ ]*0(?:\.0+)?[ ]*\)$/.test(c) || /\/[ ]*0(?:\.0+)?[ ]*\)$/.test(c);
+    if(transparent(style.color) || transparent(style.webkitTextFillColor||'')){reasons.push('列表项有透明字符');const css={};if(transparent(style.color))css.color=style.color;if(transparent(style.webkitTextFillColor||''))css.webkitTextFillColor=style.webkitTextFillColor;add('transparent-color',node,css);}
+  }
+  const style=win.getComputedStyle(el),marker=win.getComputedStyle(el,'::marker');
+  if(!['normal','none'].includes(marker.content) || style.listStyleImage!=='none' ||
+      (!['disc','circle','square','decimal','none'].includes(style.listStyleType) && !emptyListMarker(style.listStyleType))){reasons.push('列表标记含未支持生成内容');const css={};if(!['normal','none'].includes(marker.content))css.contentKind='nonstandard (value omitted)';if(style.listStyleImage!=='none')css.listStyleImage=style.listStyleImage;if((!['disc','circle','square','decimal','none'].includes(style.listStyleType) && !emptyListMarker(style.listStyleType)))css.listStyleType=/^[a-z-]+$/i.test(style.listStyleType)||['""',"''"].includes(style.listStyleType)?style.listStyleType:'[custom marker omitted]';add('list-marker',el,css,'::marker');}
+  return {...unit,complete:reasons.length===0,reasons:[...new Set(reasons)],...(options.diagnostics===false?{}:{diagnostics:diagnostics.finish()})};
+}
+function inlineTextUnit(el, measuredText, type, diagnose=()=>{}, decorations=new Set()) {
   const doc=el.ownerDocument, win=doc.defaultView, reasons=[];
   const styles=new Map(), boxes=new Map();
   const styleFor=node=>{if(!styles.has(node))styles.set(node,win.getComputedStyle(node));return styles.get(node);};
   const boxFor=node=>{if(!boxes.has(node))boxes.set(node,node.getBoundingClientRect());return boxes.get(node);};
-  if(el.tagName!=='P')return {type:el.tagName==='LI'?'list-item-text':'code-block'};
-  if(el.querySelector('p,pre,li,ul,ol,blockquote,.callout,table,img,svg,canvas,iframe,.markdown-embed,h1,h2,h3,h4,h5,h6'))reasons.push('段落包含其他独立块或嵌入');
+  if(el.querySelector('p,pre,li,ul,ol,blockquote,.callout,table,img,svg,canvas,iframe,.markdown-embed,h1,h2,h3,h4,h5,h6')){reasons.push('段落包含其他独立块或嵌入');for(const n of el.querySelectorAll('p,pre,li,ul,ol,blockquote,.callout,table,img,svg,canvas,iframe,.markdown-embed,h1,h2,h3,h4,h5,h6'))diagnose('independent-block',n);}
   let text='', rawText='', count=0;const walker=doc.createTreeWalker(el,5);
   const nodes=[el,...el.querySelectorAll('*')];
   for(const node of nodes){
+    if(decorations.has(node))continue;
     const style=styleFor(node);
-    if(node!==el && node.tagName!=='BR' && !['inline','inline-block','contents','none'].includes(style.display))reasons.push('段落内存在无法确认连续性的布局块');
+    if(node!==el && node.tagName!=='BR' && !['inline','inline-block','contents','none'].includes(style.display)){reasons.push('段落内存在无法确认连续性的布局块');diagnose('non-inline-layout',node,{display:style.display});}
     let hidden=false;
     for(let p=node;p;p=p.parentElement)if(styleFor(p).display==='none'){hidden=true;break;}
     if(hidden)continue;
@@ -139,6 +248,7 @@ function paragraphUnit(el, measuredText) {
       // serialization is conservative, not a claim that content is visible.
       if(s.display==='none' || ['hidden','collapse'].includes(s.visibility) || ['none','normal'].includes(s.content) || /^(?:"[\t\n\r\f \u200B]*"|'[\t\n\r\f \u200B]*')$/.test(s.content))continue;
       reasons.push(`段落含未测或未知生成内容：${elementPath(node,el)}${pseudo}`);
+      diagnose('generated-content',node,{contentKind:'nonempty or unknown (value omitted)',display:s.display,visibility:s.visibility},pseudo);
     }
   }
   let node;
@@ -147,27 +257,27 @@ function paragraphUnit(el, measuredText) {
     text+=node.nodeValue||'';
     rawText+=node.nodeValue||'';
     for(const part of new Intl.Segmenter('zh',{granularity:'grapheme'}).segment(node.nodeValue||'')){
-      if(++count>12000){reasons.push('段落超过完整性核验上限');break;}
+      if(++count>12000){reasons.push('段落超过完整性核验上限');diagnose('measurement-limit',node.parentElement);break;}
       if(!part.segment.trim())continue;
       const range=doc.createRange();range.setStart(node,part.index);range.setEnd(node,part.index+part.segment.length);
       const rects=Array.from(range.getClientRects()).filter(r=>r.width>0 && r.height>0);
-      if(!rects.length || styleFor(node.parentElement).visibility!=='visible' || node.parentElement.closest('button,script,style,.copy-code-button,.sr-only'))reasons.push('段落有隐藏或未测字符');
+      if(!rects.length || styleFor(node.parentElement).visibility!=='visible' || node.parentElement.closest('button,script,style,.copy-code-button,.sr-only')){reasons.push('段落有隐藏或未测字符');diagnose('unmeasured-character',node.parentElement,{visibility:styleFor(node.parentElement).visibility});}
       for(let p=node.parentElement;p;p=p.parentElement){
         const style=styleFor(p);
-        if(style.display==='none' || style.opacity==='0')reasons.push('段落有隐藏字符');
+        if(style.display==='none' || style.opacity==='0'){reasons.push('段落有隐藏字符');const css={};if(style.display==='none')css.display=style.display;if(style.opacity==='0')css.opacity=style.opacity;diagnose('hidden-character',p,css);}
         // Ancestor container clipping is checked by renderGroups. Here also
         // reject clipping inside P, which cannot be fixed by scrolling the note.
         if(el.contains(p)){
           const box=boxFor(p);
           if((/(hidden|clip|auto|scroll)/.test(style.overflowX) && rects.some(r=>r.left<box.left || r.right>box.right)) ||
-             (/(hidden|clip|auto|scroll)/.test(style.overflowY) && rects.some(r=>r.top<box.top || r.bottom>box.bottom)))reasons.push('段落字符被内部容器裁切');
+             (/(hidden|clip|auto|scroll)/.test(style.overflowY) && rects.some(r=>r.top<box.top || r.bottom>box.bottom))){reasons.push('段落字符被内部容器裁切');diagnose('internal-clipping',p,{overflowX:style.overflowX,overflowY:style.overflowY});}
         }
       }
     }
     if(count>12000)break;
   }
-  if(measuredText!==undefined && rawText.trim()!==measuredText)reasons.push('段落文本与测量结果不一致');
-  return {type:'paragraph',text:text.trim(),complete:reasons.length===0,reasons:[...new Set(reasons)]};
+  if(measuredText!==undefined && rawText.trim()!==measuredText){reasons.push('段落文本与测量结果不一致');diagnose('measurement-text-mismatch',el);}
+  return {type,text:text.trim(),complete:reasons.length===0,reasons:[...new Set(reasons)]};
 }
 function collect(root,contexts,source,path) {
   const viewport=root.getBoundingClientRect(), blocks=[], skipped=[], ranges=[];

@@ -1,6 +1,7 @@
 """CLI integration using an isolated synthetic mailbox, never a user's Vault."""
 from pathlib import Path
 import json
+import copy
 import importlib.util
 from unittest.mock import patch
 import subprocess
@@ -357,6 +358,159 @@ class CLITests(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stderr)
         self.assertEqual(json.loads(result.stdout)['suspected'], 0)
         self.assertEqual(json.loads(result.stdout)['visibleCoverage'], 'uncovered')
+
+    @staticmethod
+    def list_capture(report, response):
+        # Two distinct DOM items share the source LIST range; neither is editable.
+        target = report['capturedTargets'][0]
+        target.update(coverage='complete', measuredBlocks=2,
+                      requested=dict(kind='lines', startLine=3, endLine=4,
+                                     text='- 合成段落\n- 第二项'),
+                      ranges=[dict(startLine=3, endLine=4)],
+                      expected=[dict(type='list', startLine=3, endLine=4)])
+        block = report['blocks'][0]
+        block.update(key='2:3:0.0', sourceEndLine=4, domPath='0.0',
+                     measurementUnit=dict(type='list-item-text', text='合成段落',
+                                          complete=True, reasons=[]))
+        block['capture'].update(eligibleForEdit=False, editReasons=['列表不属于编辑候选'])
+        sibling = copy.deepcopy(block)
+        sibling.update(key='2:3:0.1', domPath='0.1', suspected=False)
+        sibling['measurementUnit']['text'] = '第二项'
+        report['blocks'].append(sibling)
+        response['blocks'] = 2
+
+    def test_visible_list_contract_complete_and_partial_table(self):
+        for status in ['complete', 'incomplete']:
+            with self.subTest(status=status):
+                self.setUp()
+                self.note.write_text('标题\n\n- 合成段落\n- 第二项\n')
+                def mutate(report, response):
+                    self.list_capture(report, response)
+                    if status == 'incomplete':
+                        report['skipped'] = [dict(kind='表格', coverage='uncovered')]
+                        report['visibleReasons'] = ['表格未支持测量']
+                        response['skipped'] = 1
+                result = self.invoke(['--visible-only', '--include-request'], status=status, mutate=mutate)
+                self.assertEqual(result.returncode, 0 if status == 'complete' else 1, result.stderr)
+                out = json.loads(result.stdout)
+                self.assertEqual(out['response']['suspected'], 1)
+                archive = json.loads((self.root / out['response']['archivePath']).read_text())
+                self.assertTrue(all(b['capture']['eligibleForEdit'] is False for b in archive['blocks']))
+                self.assertEqual(archive['visibleCoverage'], 'complete' if status == 'complete' else 'uncovered')
+
+    def test_visible_list_contract_rejects_false_confirmation(self):
+        self.note.write_text('标题\n\n- 合成段落\n- 第二项\n')
+        result = self.invoke(['--visible-only'], status='incomplete', mutate=self.list_capture)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(json.loads(result.stdout)['suspected'], 1)
+        archive_path = self.plugin / 'reports/synthetic.json'
+        baseline = json.loads(archive_path.read_text())
+        response = json.loads((self.plugin / 'response.json').read_text())
+        spec = importlib.util.spec_from_file_location('list_contract', SCRIPT)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        mutations = {
+            'incomplete': lambda r: r['blocks'][0]['measurementUnit'].update(complete=False),
+            'hidden-or-clipped': lambda r: r['blocks'][0]['measurementUnit'].update(reasons=['隐藏或裁切']),
+            'unknown-unit': lambda r: r['blocks'][0]['measurementUnit'].update(type='unknown'),
+            'unmapped': lambda r: r['blocks'][0]['sourceMapping'].update(status='unmapped'),
+            'wrong-source-version': lambda r: r.update(sourceSha256='stale'),
+            'wrong-file': lambda r: r.update(file='other.md'),
+            'editable-li': lambda r: r['blocks'][0]['capture'].update(eligibleForEdit=True),
+            'bad-width': lambda r: r['blocks'][0].update(availableWidthPx=0),
+            'duplicate-node-key': lambda r: r['blocks'][1].update(key='2:3:0.0', domPath='0.0'),
+            'uncovered-group': lambda r: r['capturedTargets'][0].update(coverage='uncovered'),
+            'unresolved-group': lambda r: r['capturedTargets'][0].update(resolved=False),
+            'ambiguous-owner': lambda r: r['capturedTargets'][0].update(reasons=['渲染归属不唯一']),
+            'mapping-gap': lambda r: r['capturedTargets'][0].update(mappingGaps=[{'kind': 'unknown'}]),
+            'wrong-source-type': lambda r: r['capturedTargets'][0]['expected'][0].update(type='paragraph'),
+            'wrong-source-range': lambda r: r['capturedTargets'][0]['expected'][0].update(endLine=3),
+            'missing-sibling': lambda r: r['capturedTargets'][0].update(measuredBlocks=3),
+            'incomplete-sibling': lambda r: r['blocks'][1]['measurementUnit'].update(complete=False),
+            'unconfirmed-sibling': lambda r: r['blocks'][1]['capture'].update(coverage='uncovered'),
+        }
+        for name, mutate in mutations.items():
+            with self.subTest(name=name):
+                report = copy.deepcopy(baseline)
+                mutate(report)
+                archive_path.write_text(json.dumps(report))
+                with self.assertRaises(SystemExit):
+                    module.verify_report(response, self.request, self.root, self.plugin)
+
+    @staticmethod
+    def editable_list_capture(report, response):
+        CLITests.list_capture(report, response)
+        for block in report['blocks']:
+            block['text'] = block['measurementUnit']['text']
+        report['blocks'][0]['capture'].update(eligibleForEdit=True, editReasons=[],
+            editTarget=dict(kind='list-item', startLine=3, endLine=3, text='- 合成段落', itemIndex=0))
+
+    def test_visible_editable_list_survives_unrelated_table(self):
+        for status in ['complete', 'incomplete']:
+            with self.subTest(status=status):
+                self.setUp()
+                self.note.write_text('标题\n\n- 合成段落\n- 第二项\n')
+                def mutate(report, response):
+                    self.editable_list_capture(report, response)
+                    if status == 'incomplete':
+                        report['skipped'] = [dict(kind='表格', coverage='uncovered')]
+                        response['skipped'] = 1
+                result = self.invoke(['--visible-only', '--include-request'], status=status, mutate=mutate)
+                self.assertEqual(result.returncode, 0 if status == 'complete' else 1, result.stderr)
+                out = json.loads(result.stdout)
+                report = json.loads((self.root / out['response']['archivePath']).read_text())
+                target = report['blocks'][0]['capture']['editTarget']
+                self.assertEqual(target['text'], self.note.read_text().split('\n')[target['startLine'] - 1])
+                self.assertEqual(target['startLine'], target['endLine'])
+                self.assertNotEqual(target['endLine'], report['blocks'][0]['sourceEndLine'])
+                self.assertFalse(report['blocks'][1]['capture']['eligibleForEdit'])
+
+    def test_list_edit_rejects_wrong_item_or_missing_proof(self):
+        self.note.write_text('标题\n\n- 合成段落\n- 第二项\n')
+        result = self.invoke(['--visible-only'], status='incomplete', mutate=self.editable_list_capture)
+        self.assertEqual(json.loads(result.stdout)['suspected'], 1, result.stderr)
+        archive_path = self.plugin / 'reports/synthetic.json'
+        baseline = json.loads(archive_path.read_text())
+        response = json.loads((self.plugin / 'response.json').read_text())
+        spec = importlib.util.spec_from_file_location('list_edit_contract', SCRIPT)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        mutations = {
+            'missing-target': lambda r: r['blocks'][0]['capture'].pop('editTarget'),
+            'whole-list': lambda r: r['blocks'][0]['capture']['editTarget'].update(endLine=4),
+            'wrong-text': lambda r: r['blocks'][0]['capture']['editTarget'].update(text='- 其他项'),
+            'wrong-index': lambda r: r['blocks'][0]['capture']['editTarget'].update(itemIndex=1),
+            'boolean-index': lambda r: r['blocks'][0]['capture']['editTarget'].update(itemIndex=False),
+            'select-sibling': lambda r: r['blocks'][0]['capture'].update(editTarget=dict(
+                kind='list-item', startLine=4, endLine=4, text='- 第二项', itemIndex=1)),
+            'reordered-dom': lambda r: r['blocks'][0].update(domPath='0.1', key='2:3:0.1'),
+            'different-parent': lambda r: r['blocks'][1].update(domPath='1.1', key='2:3:1.1'),
+            'wrong-rendered-text': lambda r: r['blocks'][0].update(text='其他文字'),
+            'wrong-measured-text': lambda r: r['blocks'][0]['measurementUnit'].update(text='其他文字'),
+            'not-suspected': lambda r: r['blocks'][0].update(suspected=False),
+            'edit-reasons': lambda r: r['blocks'][0]['capture'].update(editReasons=['定位不明']),
+            'incomplete-sibling': lambda r: r['blocks'][1]['measurementUnit'].update(complete=False),
+            'bad-mapping': lambda r: r['blocks'][0]['sourceMapping'].update(status='unmapped'),
+        }
+        for name, mutate in mutations.items():
+            with self.subTest(name=name):
+                report = copy.deepcopy(baseline)
+                mutate(report)
+                archive_path.write_text(json.dumps(report))
+                with self.assertRaises(SystemExit):
+                    module.verify_report(response, self.request, self.root, self.plugin)
+
+    def test_simple_list_source_supports_only_unambiguous_single_lines(self):
+        spec = importlib.util.spec_from_file_location('simple_list_source', SCRIPT)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        for source in ['- 正文 `echo $?`\n- 第二项', '1. 正文\n2. 第二项', '- ` code ` 正文']:
+            with self.subTest(source=source):
+                self.assertIsNotNone(module.simple_list_source(source, 1, len(source.split('\n'))))
+        for source in ['- 同文\n- 同文', '- 正文\n  续行', '- [ ] 任务', '- **加粗**',
+                       '- [链接](url)', '- `未闭合', '- 正文  ', '- 正文\n  - 子项', '- 正文\n+ 第二项']:
+            with self.subTest(source=source):
+                self.assertIsNone(module.simple_list_source(source, 1, len(source.split('\n'))))
 
     def test_visible_partial_claims_still_require_identity_and_measurement(self):
         mutations = [lambda r, p: r['blocks'][0]['sourceMapping'].update(status='unmapped'),
