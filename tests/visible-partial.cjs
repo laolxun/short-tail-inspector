@@ -7,7 +7,7 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
     const page=await browser.newPage();
     await page.setContent('<style>body{margin:8px}p{font:16px sans-serif;width:120px;line-height:24px;margin:6px 0}pre{width:120px}td{padding:5px}</style>');
     const scanner=fs.readFileSync(path.join(__dirname,'../main.js'),'utf8').split('class ResultModal')[0].split('\n').slice(1).join('\n');
-    await page.addScriptTag({content:scanner+';window.scanner={sectionFor,elementPath,SELECTOR,settleLayout,refreshReading,inspect,LayoutContexts};'});
+    await page.addScriptTag({content:scanner+';window.scanner={sourceMappingFor,sectionFor,elementPath,SELECTOR,settleLayout,refreshReading,inspect,LayoutContexts};'});
     await page.addScriptTag({content:'{const module={exports:{}};'+fs.readFileSync(path.join(__dirname,'../target-scan.js'),'utf8')+';window.targets=module.exports;}'});
     const results=await page.evaluate(async()=>{
       window.require=()=>({createHash:()=>({update(){return this;},digest:()=> 'synthetic-sha'})});
@@ -25,9 +25,14 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
         for(const part of parts){
           const owner=document.createElement('div');owner.innerHTML=part.html;root.append(owner);
           const end=start+part.source.split('\n').length-1,info={lineStart:start,lineEnd:end,text:source};
-          contexts.set(owner,{ctx:{sourcePath:file.path,getSectionInfo:()=>info},info});
+          contexts.set(owner,{ctx:{sourcePath:file.path,getSectionInfo:()=>info},info:options.cacheOnly?{...info}:info});
           cache.sections.push({type:part.type,position:{start:{line:start},end:{line:end}}});
           start=end+2;
+        }
+        if(options.missingCache){for(const [,record] of contexts)record.info=null;}
+        if(options.staleChild){
+          const p=root.querySelector('p'),info={text:'stale',lineStart:0,lineEnd:0};
+          contexts.set(p,{ctx:{sourcePath:file.path,getSectionInfo:()=>info},info});
         }
         if(options.stale){for(const [,record] of contexts)record.info.text='stale';}
         if(options.hidden)root.querySelector('p').append(Object.assign(document.createElement('span'),{textContent:'遗漏'}));
@@ -46,6 +51,9 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
         out.push({name,report,confirmed:confirmed.length,writes,calls});return report;
       }
       await run('paragraph-and-code',{code:true});
+      await run('stale-cache-live-valid',{cacheOnly:true,stale:true});
+      await run('missing-cache-live-valid',{cacheOnly:true,missingCache:true});
+      await run('stale-child-trusted-ancestor',{staleChild:true});
       await run('paragraph-and-table',{table:true});
       await run('paragraph-and-unknown',{unknown:true});
       await run('no-suspect-with-table',{clear:true,table:true});
@@ -61,21 +69,31 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
     });
     for(const r of results){
       const report=r.report;
-      if(['paragraph-and-code','protected-code-only'].includes(r.name))assert.equal(report.visibleCoverage,'complete',r.name);
+      if(['paragraph-and-code','protected-code-only','stale-cache-live-valid','missing-cache-live-valid','stale-child-trusted-ancestor'].includes(r.name))assert.equal(report.visibleCoverage,'complete',r.name);
       else assert.equal(report.visibleCoverage,'uncovered',r.name);
-      if(['paragraph-and-code','paragraph-and-table','paragraph-and-unknown','paragraph-code-table'].includes(r.name)){
+      if(['paragraph-and-code','paragraph-and-table','paragraph-and-unknown','paragraph-code-table','stale-cache-live-valid','missing-cache-live-valid','stale-child-trusted-ancestor'].includes(r.name)){
         assert.equal(r.confirmed,1,r.name+': keep trusted suspect');
         const block=report.blocks.find(b=>b.capture.coverage==='complete');
         assert.equal(block.sourceMapping.status,'mapped');assert.ok(block.sourceStartLine>=1);assert.equal(block.measurementUnit.complete,true);
         // The original stricter target gate still denies editing with unknown scope.
         assert.equal(block.capture.eligibleForEdit,r.name!=='paragraph-and-unknown',r.name+': unchanged edit gate');
       }else assert.equal(r.confirmed,0,r.name+': no false confirmed suspect');
+      if(r.name==='stale-child-trusted-ancestor'){
+        assert.equal(report.blocks[0].sourceMapping.basis,'live');
+        assert.equal(report.blocks[0].sourceMapping.failures[0].reason,'source-version-mismatch');
+      }
       if(r.name.includes('table'))assert.ok(report.visibleReasons.some(s=>s.includes('表格')),r.name+': table reason');
       if(['paragraph-and-code','protected-code-only','paragraph-code-table'].includes(r.name)){
         const code=report.skipped.find(b=>b.kind==='代码块');assert.equal(code.coverage,'excluded');assert.ok(code.sourceStartLine>=1);assert.ok(code.sourceEndLine>=code.sourceStartLine);
       }
+      if(r.name==='paragraph-and-unknown'){
+        const gap=report.capturedTargets[0].mappingGaps.find(g=>g.mappingDecision?.decision==='rejected');
+        assert.equal(gap.mappingDecision.reason,'context-missing');
+        assert.equal(gap.mappingDecision.ownerDomPath,null);
+        assert.ok(JSON.stringify(report));
+      }
       if(r.name==='unmapped-code-is-not-exclusion')assert.ok(report.skipped.every(b=>b.coverage!=='excluded'));
-      if(/hidden|stale|clipped|failed/.test(r.name))assert.ok(report.blocks.every(b=>!b.capture.eligibleForEdit && b.capture.coverage!=='complete'));
+      if(/hidden|stale-paragraph|clipped|failed/.test(r.name))assert.ok(report.blocks.every(b=>!b.capture.eligibleForEdit && b.capture.coverage!=='complete'));
     }
     console.log(JSON.stringify({passed:results.length,checks:results.map(r=>({name:r.name,visibleCoverage:r.report.visibleCoverage,confirmedSuspects:r.confirmed,calls:r.calls,writes:r.writes,visibleReasons:r.report.visibleReasons}))},null,2));
   }finally{await browser.close();}

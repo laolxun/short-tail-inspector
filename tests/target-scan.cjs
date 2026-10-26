@@ -8,7 +8,7 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     const page = await browser.newPage();
     await page.setContent('<style>body{margin:8px}p{font:16px sans-serif;width:120px;line-height:24px;margin:12px 0}h2{font:18px sans-serif}pre{font:16px monospace}</style>');
     let scanner = fs.readFileSync(path.join(__dirname, '../main.js'), 'utf8').split('class ResultModal')[0].split('\n').slice(1).join('\n');
-    await page.addScriptTag({content: scanner + '\nwindow.scanner={sectionFor,elementPath,SELECTOR,settleLayout,refreshReading,inspect,LayoutContexts};'});
+    await page.addScriptTag({content: scanner + '\nwindow.scanner={sourceMappingFor,sectionFor,elementPath,SELECTOR,settleLayout,refreshReading,inspect,LayoutContexts};'});
     await page.addScriptTag({content: '{const module={exports:{}};\n' + fs.readFileSync(path.join(__dirname, '../target-scan.js'), 'utf8') + '\nwindow.targetModule=module.exports;}'});
     const result = await page.evaluate(async () => {
       window.require = () => ({createHash: () => ({update() {return this;}, digest: () => 'fixture-hash'})});
@@ -113,7 +113,7 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
       f = fixture();const absent = f.contexts.get(f.rows[2].owner);
       f.contexts.set(f.rows[2].owner, {...absent, info: {lineStart: absent.info.lineStart, lineEnd: absent.info.lineEnd}});
       r = await run(f, [target(f.rows[2])]);
-      assert(r.targeting.scanMethod === 'full' && r.scan.complete && r.targeting.result === 'uncovered', 'legacy full coverage alone is not targeted source-version proof');checks.push('missingVersionEvidenceUncovered');
+      assert(r.targeting.scanMethod === 'visible' && r.targeting.coverage === 'complete', 'valid live source version must survive missing registration version');checks.push('liveVersionRecoversMissingRegistrationVersion');
 
       f = fixture();f.cache.sections.splice(4, 1);
       r = await run(f, [{kind:'lines',startLine:1,endLine:f.source.split('\n').length}]);
@@ -140,7 +140,7 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
       const inspect = f.hooks.inspect;
       f.hooks.inspect = (...args) => {makeSecondStale(f);return inspect(...args);};
       r = await run(f, [{kind: 'lines', startLine: f.rows[0].startLine, endLine: f.rows[1].endLine}]);
-      assert(!f.calls[0].full && !r.scan.missingSourceLocations && r.targeting.result === 'uncovered', 'live parent recovers position while the existing target guard still rejects stale child evidence');
+      assert(!f.calls[0].full && !r.scan.missingSourceLocations && r.targeting.result === 'uncovered', 'live mapping recovers position but multiple actual owners still reject coverage');
       checks.push('staleChildPositionRecoveredButTargetStillUncovered');
 
       f = mixedMapping();const inspectWithoutVersion = f.hooks.inspect;
@@ -149,7 +149,7 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
         f.contexts.set(f.rows[1].p, {...record, info});return inspectWithoutVersion(...args);
       };
       r = await run(f, [{kind:'lines',startLine:f.rows[0].startLine,endLine:f.rows[1].endLine}]);
-      assert(!f.calls[0].full && !r.scan.missingSourceLocations && r.targeting.result === 'uncovered', 'source locations alone cannot cover loss of trustworthy rendering version');
+      assert(!f.calls[0].full && !r.scan.missingSourceLocations && r.targeting.result === 'uncovered', 'valid live version cannot clear ambiguous multiple owners');
       checks.push('versionEvidenceLostDuringLocalScanUncovered');
 
       function rangeFixture() {

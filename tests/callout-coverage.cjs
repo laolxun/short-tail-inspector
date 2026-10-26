@@ -9,7 +9,7 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     const page = await browser.newPage();
     await page.setContent('<style>body{margin:8px}p{font:16px sans-serif;width:120px;line-height:24px;margin:12px 0}h2{font:18px sans-serif}.callout-title{display:none}.callout-icon,.callout-fold{display:flex}.callout-icon::after,.callout-fold::after{content:"\\200B"}</style>');
     const scanner = fs.readFileSync(path.join(__dirname, '../main.js'), 'utf8').split('class ResultModal')[0].split('\n').slice(1).join('\n');
-    await page.addScriptTag({content: scanner + '\nwindow.scanner={sectionFor,elementPath,SELECTOR,settleLayout,refreshReading,inspect,LayoutContexts};'});
+    await page.addScriptTag({content: scanner + '\nwindow.scanner={sourceMappingFor,sectionFor,elementPath,SELECTOR,settleLayout,refreshReading,inspect,LayoutContexts};'});
     await page.addScriptTag({content: '{const module={exports:{}};\n' + fs.readFileSync(path.join(__dirname, '../target-scan.js'), 'utf8') + '\nwindow.targetModule=module.exports;}'});
     const checks = await page.evaluate(async () => {
       window.require = () => ({createHash: () => ({update() {return this;}, digest: () => 'fixture-hash'})});
@@ -165,7 +165,16 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
       await bad('visibilityHiddenBodyUncovered', f => f.content.firstElementChild.style.visibility = 'hidden');
       await bad('clippedBodyUncovered', f => f.content.style.cssText = 'height:10px;overflow:hidden');
       await bad('embeddedBodyUncovered', f => f.content.firstElementChild.classList.add('markdown-embed'));
-      await bad('staleCalloutVersionUncovered', f => {const rec = f.contexts.get(f.callOwner);f.contexts.set(f.callOwner, {...rec, info: {...rec.info, text: 'stale'}});});
+      f = fixture();
+      const liveCallout = f.contexts.get(f.callOwner);
+      f.contexts.set(f.callOwner, {...liveCallout, info: {...liveCallout.info, text: 'stale'}});
+      r = await run(f, [f.call]);
+      assert(r.targeting.coverage === 'complete', 'trusted live Callout must survive stale registration');
+      checks.push('liveCalloutSurvivesStaleRegistration');
+      await bad('staleCalloutVersionUncovered', f => {
+        const rec = f.contexts.get(f.callOwner), info = {...rec.info, text: 'stale'};
+        f.contexts.set(f.callOwner, {ctx: {...rec.ctx, getSectionInfo: () => info}, info});
+      });
       await bad('missingCalloutMappingUncovered', f => f.contexts.set(f.callOwner, {ctx: {sourcePath: f.file.path, getSectionInfo: () => null}, info: null}));
       await bad('metadataCalloutWithoutContainerUncovered', f => f.callout.className = 'other');
       await bad('complexBodyConservativelyUncovered', () => {}, {body: ['**强调正文**']});

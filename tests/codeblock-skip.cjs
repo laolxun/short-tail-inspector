@@ -17,7 +17,7 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
         if (options.code || el.closest('pre')) window.codeMeasureCalls++;
         return originalMeasure(el, options);
       };
-      window.scanner = {inspect, collect, LayoutContexts, sectionFor, elementPath,
+      window.scanner = {inspect, collect, LayoutContexts, sourceMappingFor, sectionFor, elementPath,
         SELECTOR, settleLayout, refreshReading};`});
     await page.addScriptTag({content: '{const module={exports:{}};\n' +
       fs.readFileSync(path.join(__dirname, '../target-scan.js'), 'utf8') +

@@ -7,7 +7,7 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     const page=await browser.newPage();
     await page.setContent('<style>body{margin:8px}p{font:16px sans-serif;line-height:24px;width:140px}blockquote{margin-left:16px}.callout-title{display:none}.callout-content{padding:4px}</style>');
     const scanner=fs.readFileSync(path.join(__dirname,'../main.js'),'utf8').split('class ResultModal')[0].split('\n').slice(1).join('\n');
-    await page.addScriptTag({content:scanner+'\nwindow.scanner={paragraphUnit,collect,measure,sectionFor,elementPath,SELECTOR,settleLayout,refreshReading,inspect,LayoutContexts};'});
+    await page.addScriptTag({content:scanner+'\nwindow.scanner={paragraphUnit,collect,measure,sourceMappingFor,sectionFor,elementPath,SELECTOR,settleLayout,refreshReading,inspect,LayoutContexts};'});
     await page.addScriptTag({content:'{const module={exports:{}};\n'+fs.readFileSync(path.join(__dirname,'../target-scan.js'),'utf8')+'\nwindow.targets=module.exports;}'});
     const checks=await page.evaluate(async()=>{
       window.require=()=>({createHash:()=>({update(){return this;},digest:()=> 'fixture-sha'})});

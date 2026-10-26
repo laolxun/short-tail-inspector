@@ -1,5 +1,5 @@
 const {Plugin, MarkdownView, Modal, Notice} = require('obsidian');
-const VERSION='0.2.4', THRESHOLD=0.25;
+const VERSION='0.2.5', THRESHOLD=0.25;
 const round=n=>Math.round(n*10)/10;
 const SELECTOR='h1,h2,h3,h4,h5,h6,p,pre,li';
 class LayoutContexts {
@@ -409,7 +409,7 @@ module.exports=class ShortTailInspector extends Plugin {
       const actualFont=parseFloat(root.ownerDocument.defaultView.getComputedStyle(root).fontSize);
       if(!Number.isFinite(actualWidth)||actualWidth<=0||!Number.isFinite(actualFont)||actualFont<=0 || (layout && (Math.abs(actualWidth-layout.contentWidthPx)>0.5||Math.abs(actualFont-layout.fontSizePx)>0.1)))throw new Error(`布局不符合约定：内容区 ${round(actualWidth||0)}px，字号 ${round(actualFont)}px`);
       phase='scan';
-      const hooks={sectionFor,elementPath,SELECTOR,settleLayout,refreshReading,inspect};
+      const hooks={sourceMappingFor,sectionFor,elementPath,SELECTOR,settleLayout,refreshReading,inspect};
       const report=scanMode==='visible'
         ?await this.runtimeModule('target-scan').scanVisible(target,this,source,hooks)
         :scanMode==='targets'

@@ -28,7 +28,7 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
         // A paragraph child label/range alone does not prove standalone ownership.
         ['nested-paragraph-metadata', '> '+text, `<blockquote><p>${text}</p></blockquote>`, 'paragraph', false],
         ['duplicate-independent-paragraphs', text+'\n\n'+text, `<p>${text}</p><p>${text}</p>`, 'paragraph', true, {separateOwners:true}],
-        ['stale-child-recovered-by-parent', text, `<p>${text}</p>`, 'paragraph', false, {staleChild:true}],
+        ['stale-child-recovered-by-parent', text, `<p>${text}</p>`, 'paragraph', true, {staleChild:true}],
         ['two-nodes-paragraph-metadata', text+'\n\n'+text, `<p>${text}</p><p>${text}</p>`, 'paragraph', false],
       ];
       const results = [];
@@ -80,7 +80,7 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
       if(r.name==='stale-child-recovered-by-parent'){
         assert.equal(r.full[0].sourceMapping.status,'mapped');
         assert.ok(r.full[0].sourceMapping.failures.length>0);
-        assert.equal(r.visibleCoverage,'uncovered','target tracker conservatively rejects stale child registration');
+        assert.equal(r.visibleCoverage,'complete','trusted unique parent restores coverage without bypassing paragraph edit gates');
       } else {
         assert.equal(r.visibleCoverage,'complete',r.name+': edit rejection does not change scan coverage');
       }

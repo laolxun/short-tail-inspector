@@ -57,15 +57,14 @@ function resolveTargets(input, source, cache = {}) {
   });
 }
 
+// Use the same validator as collect(), with the current file and reading root.
+// Never reselect a nearer registration record after it chose a trusted owner.
+function coverageMapping(el, plugin, source, file, hooks) {
+  const root = el.closest('.markdown-preview-view');
+  return hooks.sourceMappingFor(el, plugin.contexts, source, {root, filePath: file});
+}
 function trustedSection(el, plugin, source, file, hooks) {
-  const sec = hooks.sectionFor(el, plugin.contexts, source);
-  if (!sec || sec.sourcePath !== file || !Number.isInteger(sec.start) || !Number.isInteger(sec.end) || sec.start < 0 || sec.end < sec.start) return null;
-  // Old/absent rendering-version evidence is insufficient for targeted acceptance.
-  for (let p = el; p; p = p.parentElement) {
-    const record = plugin.contexts.get(p);
-    if (record?.ctx) return record.info?.text === source ? sec : null;
-  }
-  return null;
+  return coverageMapping(el, plugin, source, file, hooks).section;
 }
 
 // This only bounds where an unmapped node could belong; it never repairs its
@@ -122,6 +121,11 @@ function renderGroups(root, plugin, source, file, hooks, wantedRanges) {
   const scope = unmappedScope(root, plugin, source, file, hooks), mappingGaps = [];
   const unknown = (el, kind, fromHrBranch = false) => {
     const possibleRange = scope(el), gap = {kind, possibleRange};
+    const mapping = coverageMapping(el, plugin, source, file, hooks);
+    gap.mappingDecision = {decision: mapping.section ? 'accepted' : 'rejected',
+      reason: mapping.reason || null, basis: mapping.basis || null,
+      ownerDomPath: mapping.section ? hooks.elementPath(mapping.section.owner, root) : null,
+      failures: mapping.failures};
     if (possibleRange === null) {
       const nodeClass = node => node?.getAttribute?.('class') ?? (typeof node?.className === 'string' ? node.className : '');
       const parent = el.parentElement;
